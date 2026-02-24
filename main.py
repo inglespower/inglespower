@@ -22,22 +22,22 @@ async def voice(request: Request):
         "You have no minutes. Please recharge your account. Thank you.",
             voice="alice"
                 )
+
+
+    gather = Gather(
+        input="speech",
+        action="/process",
+        method="POST",
+        speechTimeout="auto"
+)
+
+    gather.say(
+        "Hello. I am your bilingual English coach. You can ask me anything.",
+        voice="alice"
+)
+
+    resp.append(gather)
     return str(resp)
-
-gather = Gather(
-input="speech",
-action="/process",
-method="POST",
-speechTimeout="auto"
-)
-
-gather.say(
-"Hello. I am your bilingual English coach. You can ask me anything.",
-voice="alice"
-)
-
-resp.append(gather)
-return str(resp)
 
 
 # -------------------------
