@@ -96,7 +96,7 @@ if amount == 2:
 elif amount == 4:
     minutes = 10
 elif amount == 6:
-minutes = 15
+    minutes = 15
 
 if minutes > 0:
 add_minutes(phone, minutes)
