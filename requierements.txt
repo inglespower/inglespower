@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-twilio
-requests
-openai
-supabase
-python-dotenv
