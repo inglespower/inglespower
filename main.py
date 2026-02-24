@@ -11,18 +11,18 @@ app = FastAPI()
 # -------------------------
 @app.post("/voice")
 async def voice(request: Request):
-form = await request.form()
-phone = form.get("From")
+    form = await request.form()
+    phone = form.get("From")
 
-resp = VoiceResponse()
+    resp = VoiceResponse()
 
-# Verificar minutos
-if get_minutes(phone) <= 0:
-resp.say(
-"You have no minutes. Please recharge your account. Thank you.",
-voice="alice"
-)
-return str(resp)
+    # Verificar minutos
+    if get_minutes(phone) <= 0:
+                resp.say(
+        "You have no minutes. Please recharge your account. Thank you.",
+            voice="alice"
+                )
+    return str(resp)
 
 gather = Gather(
 input="speech",
