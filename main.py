@@ -85,7 +85,7 @@ return str(resp)
 # -------------------------
 @app.post("/purchase")
 async def purchase(request: Request):
-data = await request.json()
+    data = await request.json()
 
 phone = data.get("phone")
 amount = float(data.get("amount", 0))
