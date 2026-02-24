@@ -1,0 +1,4 @@
+flask
+gunicorn
+elevenlabs
+python-dotenv
