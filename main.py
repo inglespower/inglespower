@@ -63,7 +63,7 @@ async def process(request: Request):
 reply = generate_reply(speech)
 
 # aviso cuando queda 1 minuto
-    if get_minutes(phone) == 1:
+if get_minutes(phone) == 1:
         resp.say("You have one minute remaining.", voice="alice")
 
 # responder
