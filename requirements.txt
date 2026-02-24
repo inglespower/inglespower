@@ -1,4 +1,8 @@
-flask
-gunicorn
-elevenlabs
+fastapi
+uvicorn
+twilio
+supabase
+openai
 python-dotenv
+python-multipart
+elevenlabs
