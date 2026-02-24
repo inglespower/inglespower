@@ -98,7 +98,7 @@ elif amount == 4:
 elif amount == 6:
     minutes = 15
 
-    if minutes > 0:
+        if minutes > 0:
 add_minutes(phone, minutes)
 
 send_sms(
