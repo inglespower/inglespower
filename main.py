@@ -52,7 +52,7 @@ async def process(request: Request):
     resp = VoiceResponse()
 
     # verificar minutos
-        if get_minutes(phone) <= 0:
+    if get_minutes(phone) <= 0:
             resp.say("Your time is finished. Goodbye.", voice="alice")
     return str(resp)
 
