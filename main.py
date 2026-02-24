@@ -94,7 +94,7 @@ minutes = 0
 if amount == 2:
         minutes = 5
 elif amount == 4:
-minutes = 10
+    minutes = 10
 elif amount == 6:
 minutes = 15
 
