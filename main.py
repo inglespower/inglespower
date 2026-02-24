@@ -98,12 +98,12 @@ elif amount == 4:
 elif amount == 6:
     minutes = 15
 
-        if minutes > 0:
-add_minutes(phone, minutes)
+    if minutes > 0:
+        add_minutes(phone, minutes)
 
-send_sms(
-phone,
-f"Thank you for your purchase. You now have {get_minutes(phone)} minutes in InglesPower."
-)
+        send_sms(
+        phone,
+        f"Thank you for your purchase. You now have {get_minutes(phone)} minutes in InglesPower."
+        )
 
-return {"status": "ok"}
+    return {"status": "ok"}
