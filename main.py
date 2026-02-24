@@ -45,19 +45,19 @@ return str(resp)
 # -------------------------
 @app.post("/process")
 async def process(request: Request):
-form = await request.form()
-phone = form.get("From")
-speech = form.get("SpeechResult", "")
+    form = await request.form()
+    phone = form.get("From")
+    speech = form.get("SpeechResult", "")
 
-resp = VoiceResponse()
+    resp = VoiceResponse()
 
-# verificar minutos
-if get_minutes(phone) <= 0:
-resp.say("Your time is finished. Goodbye.", voice="alice")
-return str(resp)
+    # verificar minutos
+    if get_minutes(phone) <= 0:
+    resp.say("Your time is finished. Goodbye.", voice="alice")
+    return str(resp)
 
-# restar 1 minuto
-subtract_minute(phone)
+    # restar 1 minuto
+    subtract_minute(phone)
 
 # generar respuesta AI
 reply = generate_reply(speech)
