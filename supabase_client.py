@@ -4,7 +4,7 @@ from config import SUPABASE_URL, SUPABASE_KEY
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def get_minutes(phone):
-res = supabase.table("minutes").select("*").eq("phone_number", phone).execute()
+    res = supabase.table("minutes").select("*").eq("phone_number", phone).execute()
 if res.data:
 return res.data[0]["minutes_remaining"]
 return 0
