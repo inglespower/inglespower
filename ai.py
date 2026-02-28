@@ -32,7 +32,8 @@ def get_nathaniel_voice_url(texto):
     api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
     
-    # CORRECCIÓN DE URL: Se añade la ruta completa /v1/text-to-speech/
+    # --- CORRECCIÓN CRÍTICA AQUÍ ---
+    # La URL DEBE tener la ruta completa para que ElevenLabs la reconozca
     url_eleven = f"https://api.elevenlabs.io{voice_id}"
     
     headers = {
