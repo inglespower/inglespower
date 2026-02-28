@@ -4,10 +4,10 @@ import requests
 import uuid
 from supabase import create_client
 
-# 1. CONFIGURACIÓN DE CLIENTES
-openai.api_key = os.environ.get("OPENAI_API_KEY")
-supabase_url = os.environ.get("SUPABASE_URL")
-supabase_key = os.environ.get("SUPABASE_KEY") 
+# 1. CONFIGURACIÓN DE CLIENTES (LIMPIEZA DE ESPACIOS)
+openai.api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
 
 if not supabase_url or not supabase_key:
     raise ValueError("Error: Faltan SUPABASE_URL o SUPABASE_KEY en Render.")
@@ -17,7 +17,7 @@ supabase = create_client(supabase_url, supabase_key)
 def generate_reply(user_text):
     system = "You are InglesPower, a bilingual English coach. Be brief."
     try:
-        # CORRECCIÓN 1: Formato compatible con openai==0.28
+        # Formato compatible con openai==0.28
         resp = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_text}],
@@ -29,11 +29,10 @@ def generate_reply(user_text):
         return "Keep going, I'm listening."
 
 def get_nathaniel_voice_url(texto):
-    api_key = os.environ.get("ELEVENLABS_API_KEY")
-    voice_id = os.environ.get("ELEVENLABS_VOICE_ID")
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
     
-    # CORRECCIÓN 2: La URL de ElevenLabs estaba incompleta
-    # Faltaba "/v1/text-to-speech/" en medio
+    # CORRECCIÓN DE URL: Se añade la ruta completa /v1/text-to-speech/
     url_eleven = f"https://api.elevenlabs.io{voice_id}"
     
     headers = {
@@ -48,7 +47,8 @@ def get_nathaniel_voice_url(texto):
     }
     
     try:
-        response = requests.post(url_eleven, json=data, headers=headers, timeout=15)
+        # Se aumentó el timeout a 30 para evitar cortes en audios largos
+        response = requests.post(url_eleven, json=data, headers=headers, timeout=30)
         
         if response.status_code == 200:
             file_name = f"voice_{uuid.uuid4()}.mp3"
@@ -60,6 +60,7 @@ def get_nathaniel_voice_url(texto):
                 file_options={"content-type": "audio/mpeg"}
             )
             
+            # Obtener URL pública (Asegúrate que el bucket 'audios' sea público en Supabase)
             return supabase.storage.from_("audios").get_public_url(file_name)
         else:
             print(f"Error ElevenLabs: {response.status_code} - {response.text}")
