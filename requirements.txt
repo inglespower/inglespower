@@ -4,6 +4,7 @@ supabase
 openai
 elevenlabs
 twilio
+telnyx
 python-dotenv
 python-multipart
 httpx
