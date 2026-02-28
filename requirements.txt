@@ -1,7 +1,7 @@
 fastapi
 uvicorn==0.23.2
 supabase
-openai==0.28
+openai>=1.0.0
 elevenlabs
 twilio
 telnyx
