@@ -1,12 +1,14 @@
-from twilio.rest import Client
-from config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER
+import telnyx
+import os
 
-client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+# Telnyx usa estas llaves que ya configuramos en Render
+telnyx.api_key = os.getenv("TELNYX_API_KEY")
+TELNYX_PHONE_NUMBER = os.getenv("TELNYX_PHONE_NUMBER")
 
 def send_sms(to, body):
-    # Todo este bloque debe llevar sangría (4 espacios)
-    return client.messages.create(
-        body=body,
-        from_=TWILIO_PHONE_NUMBER,
-        to=to
+    # Esta función enviará el mensaje usando tu saldo de Telnyx
+    return telnyx.Message.create(
+        from_=TELNYX_PHONE_NUMBER,
+        to=to,
+        text=body
     )
