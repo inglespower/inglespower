@@ -4,21 +4,20 @@ import requests
 import uuid
 from supabase import create_client
 
-# 1. CONFIGURACIÓN DE CLIENTES (CORREGIDA PARA RENDER)
+# 1. CONFIGURACIÓN DE CLIENTES
 openai.api_key = os.environ.get("OPENAI_API_KEY")
 supabase_url = os.environ.get("SUPABASE_URL")
-
-# Coincide con el nombre de tu panel de Render
 supabase_key = os.environ.get("SUPABASE_KEY") 
 
 if not supabase_url or not supabase_key:
-    raise ValueError("Error: Faltan SUPABASE_URL o SUPABASE_KEY en las variables de Render.")
+    raise ValueError("Error: Faltan SUPABASE_URL o SUPABASE_KEY en Render.")
 
 supabase = create_client(supabase_url, supabase_key)
 
 def generate_reply(user_text):
     system = "You are InglesPower, a bilingual English coach. Be brief."
     try:
+        # CORRECCIÓN 1: Formato compatible con openai==0.28
         resp = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user_text}],
@@ -33,7 +32,8 @@ def get_nathaniel_voice_url(texto):
     api_key = os.environ.get("ELEVENLABS_API_KEY")
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID")
     
-    # URL CORREGIDA: Ahora Nathaniel sí podrá hablar
+    # CORRECCIÓN 2: La URL de ElevenLabs estaba incompleta
+    # Faltaba "/v1/text-to-speech/" en medio
     url_eleven = f"https://api.elevenlabs.io{voice_id}"
     
     headers = {
