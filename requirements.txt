@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-twilio
+telnyx
 supabase
 openai
 python-dotenv
