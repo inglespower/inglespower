@@ -1,59 +1,62 @@
 import os
+
 import openai
+
 import requests
+
 import uuid
-from flask import Flask, request, jsonify
+
 from supabase import create_client
 
-####################################
-# CONFIG
-####################################
-
-app = Flask(__name__)
-
-openai.api_key = os.environ.get("OPENAI_API_KEY","").strip()
-
-TELNYX_API_KEY = os.environ.get("TELNYX_API_KEY","").strip()
-
-ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY","").strip()
-ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID","").strip()
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL","").strip()
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY","").strip()
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-####################################
-# OPENAI
-####################################
+# 1. CONFIGURACIÓN DE CLIENTES (LIMPIEZA DE ESPACIOS)
+
+
+
+openai.api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+
+
+
+supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+
+supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
+
+
+
+if not supabase_url or not supabase_key:
+
+    raise ValueError("Error: Faltan SUPABASE_URL o SUPABASE_KEY en Render.")
+
+
+
+supabase = create_client(supabase_url, supabase_key)
+
+
+
+
 
 def generate_reply(user_text):
 
-    system = """
-You are InglesPower AI.
 
-You teach English.
 
-Rules:
+    system = "You are InglesPower, a bilingual English coach. Be brief."
 
-Be short.
-Ask simple questions.
-Correct English.
-Wait for answer.
-"""
+
 
     try:
 
-        response = openai.ChatCompletion.create(
+
+
+        resp = openai.ChatCompletion.create(
 
             model="gpt-3.5-turbo",
 
             messages=[
 
-                {"role":"system","content":system},
+                {"role": "system", "content": system},
 
-                {"role":"user","content":user_text}
+                {"role": "user", "content": user_text}
 
             ],
 
@@ -61,209 +64,148 @@ Wait for answer.
 
         )
 
-        return response.choices[0].message.content
+
+
+        return resp.choices[0].message.content
+
+
 
     except Exception as e:
 
-        print("OpenAI error:",e)
-
-        return "Say another word in English."
 
 
-####################################
-# ELEVENLABS VOICE
-####################################
+        print(f"Error OpenAI: {e}")
 
-def generate_voice(text):
 
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+
+        return "Keep going, I'm listening."
+
+
+
+
+
+def get_nathaniel_voice_url(texto):
+
+
+
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
+
+
+
+    if not api_key:
+
+        print("Falta ELEVENLABS_API_KEY")
+
+        return None
+
+
+
+    if not voice_id:
+
+        print("Falta ELEVENLABS_VOICE_ID")
+
+        return None
+
+
+
+    # URL CORRECTA ELEVENLABS
+
+    url_eleven = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+
+
 
     headers = {
 
-        "xi-api-key": ELEVENLABS_API_KEY,
+        "xi-api-key": api_key,
 
-        "Content-Type":"application/json"
+        "Content-Type": "application/json"
 
     }
 
+
+
     data = {
 
-        "text":text,
+        "text": texto,
 
-        "model_id":"eleven_multilingual_v2",
+        "model_id": "eleven_multilingual_v2",
 
-        "voice_settings":{
+        "voice_settings": {
 
-            "stability":0.5,
+            "stability": 0.5,
 
-            "similarity_boost":0.75
+            "similarity_boost": 0.75
 
         }
 
     }
 
-    response = requests.post(
 
-        url,
 
-        json=data,
+    try:
 
-        headers=headers,
 
-        timeout=30
 
-    )
+        response = requests.post(
 
-    file_name = f"voice_{uuid.uuid4()}.mp3"
+            url_eleven,
 
+            json=data,
 
-    supabase.storage.from_("audios").upload(
+            headers=headers,
 
-        path=file_name,
+            timeout=30
 
-        file=response.content,
+        )
 
-        file_options={"content-type":"audio/mpeg"}
 
-    )
 
+        if response.status_code == 200:
 
-    public_url = supabase.storage.from_("audios").get_public_url(file_name)
 
-    return public_url
 
+            file_name = f"voice_{uuid.uuid4()}.mp3"
 
-####################################
-# TELNYX COMMAND
-####################################
 
-def telnyx_command(call_id,command,payload={}):
 
-    url = f"https://api.telnyx.com/v2/calls/{call_id}/actions/{command}"
+            supabase.storage.from_("audios").upload(
 
-    headers = {
+                path=file_name,
 
-        "Authorization":f"Bearer {TELNYX_API_KEY}",
+                file=response.content,
 
-        "Content-Type":"application/json"
+                file_options={"content-type": "audio/mpeg"}
 
-    }
+            )
 
-    requests.post(
 
-        url,
 
-        json=payload,
+            public_url = supabase.storage.from_("audios").get_public_url(file_name)
 
-        headers=headers
 
-    )
 
+            return public_url
 
-####################################
-# WEBHOOK
-####################################
 
-@app.route("/",methods=["POST"])
-def webhook():
 
-    data = request.json
+        else:
 
-    event = data["data"]["event_type"]
 
-    call_id = data["data"]["payload"]["call_control_id"]
 
-    print("EVENT:",event)
+            print("Error ElevenLabs:", response.status_code)
 
+            print(response.text)
 
-####################################
-# ANSWER CALL
-####################################
 
-    if event == "call.initiated":
 
-        telnyx_command(call_id,"answer")
+    except Exception as e:
 
-        return jsonify({"ok":True})
 
 
-####################################
-# FIRST MESSAGE
-####################################
+        print("Error Voz Nathaniel:", e)
 
-    if event == "call.answered":
 
-        welcome = "Hello. Welcome to Ingles Power. Say a word in English."
 
-        audio_url = generate_voice(welcome)
-
-        telnyx_command(call_id,"playback_start",{
-
-            "audio_url":audio_url
-
-        })
-
-
-        telnyx_command(call_id,"gather_using_speech",{
-
-            "language":"en-US",
-
-            "max_silence":5,
-
-            "speech_timeout":5
-
-        })
-
-        return jsonify({"ok":True})
-
-
-####################################
-# SPEECH RESULT
-####################################
-
-    if event == "call.speech.recognition.result":
-
-        user_text = data["data"]["payload"]["transcription"]
-
-        print("USER:",user_text)
-
-
-        reply = generate_reply(user_text)
-
-        print("AI:",reply)
-
-
-        audio_url = generate_voice(reply)
-
-
-        telnyx_command(call_id,"playback_start",{
-
-            "audio_url":audio_url
-
-        })
-
-
-        telnyx_command(call_id,"gather_using_speech",{
-
-            "language":"en-US",
-
-            "max_silence":5,
-
-            "speech_timeout":5
-
-        })
-
-
-        return jsonify({"ok":True})
-
-
-    return jsonify({"ok":True})
-
-
-####################################
-# SERVER
-####################################
-
-if __name__ == "__main__":
-
-    app.run(host="0.0.0.0",port=10000)
+    return None
