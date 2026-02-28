@@ -1,14 +1,11 @@
 import os
 import uuid
 import requests
-from flask import Flask, request, jsonify
 from openai import OpenAI
 from supabase import create_client
 
-app = Flask(__name__)
-
 # =========================
-# 🔐 CONFIGURACIÓN
+# CONFIG
 # =========================
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "").strip()
@@ -17,14 +14,11 @@ ELEVEN_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("Faltan variables de Supabase")
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 client = OpenAI(api_key=OPENAI_API_KEY)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =========================
-# 🧠 GENERAR RESPUESTA GPT
+# GPT RESPONSE
 # =========================
 
 def generate_reply(user_text):
@@ -53,10 +47,14 @@ def generate_reply(user_text):
         return "Keep going, I am listening."
 
 # =========================
-# 🔊 CONVERTIR A VOZ
+# ELEVENLABS VOICE
 # =========================
 
-def text_to_speech(text):
+def get_nathaniel_voice_url(text):
+
+    if not ELEVEN_API_KEY or not ELEVEN_VOICE_ID:
+        print("Faltan variables ElevenLabs")
+        return None
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
 
@@ -99,51 +97,3 @@ def text_to_speech(text):
     except Exception as e:
         print("Error ElevenLabs:", e)
         return None
-
-# =========================
-# 📞 WEBHOOK TELNYX
-# =========================
-
-@app.route("/webhook", methods=["POST"])
-def webhook():
-
-    data = request.json
-    print("DATA RECIBIDA:", data)
-
-    try:
-        # Obtener texto reconocido por Telnyx
-        transcript = data["data"]["payload"]["speech"]["alternatives"][0]["transcript"]
-
-        print("Usuario dijo:", transcript)
-
-        # Generar respuesta IA
-        ai_response = generate_reply(transcript)
-        print("AI responde:", ai_response)
-
-        # Convertir a voz
-        audio_url = text_to_speech(ai_response)
-
-        if not audio_url:
-            return jsonify({"error": "No audio generated"}), 500
-
-        # Telnyx necesita comando para reproducir audio
-        return jsonify({
-            "commands": [
-                {
-                    "command": "playback_start",
-                    "audio_url": audio_url
-                }
-            ]
-        })
-
-    except Exception as e:
-        print("Error Webhook:", e)
-        return jsonify({"error": "Webhook error"}), 500
-
-
-# =========================
-# 🚀 RUN SERVER
-# =========================
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
