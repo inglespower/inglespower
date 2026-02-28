@@ -1,9 +1,9 @@
 fastapi
-uvicorn
-telnyx
+uvicorn==0.23.2
 supabase
 openai
-python-dotenv
-python-multipart
 elevenlabs
 twilio
+python-dotenv
+python-multipart
+httpx
