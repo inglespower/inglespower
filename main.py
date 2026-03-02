@@ -5,11 +5,10 @@ from fastapi import FastAPI, Request, Response
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
-# from telnyx_sms import enviar_sms # Descomenta si ya corregiste telnyx_sms.py
 
 app = FastAPI()
 
-# Inicialización de Telnyx V4
+# Inicialización obligatoria para Telnyx v4+
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 
 @app.get("/")
@@ -30,22 +29,22 @@ async def webhook(request: Request):
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                print(f"Llamada recibida de {phone}. Minutos: {minutos}. Contestando...")
-                client.calls.answer(call_control_id=call_id)
+                print(f"Llamada de {phone}. Minutos: {minutos}. Contestando...")
+                # SINTAXIS V4: Se usa client.call_control.answer
+                client.call_control.answer(call_id)
             else:
                 print(f"Sin saldo para {phone}. Colgando.")
-                # enviar_sms(phone, "Saldo insuficiente. Compra minutos en nuestra web.")
-                client.calls.hangup(call_control_id=call_id)
+                client.call_control.hangup(call_id)
 
-        # 2. LLAMADA CONTESTADA: Saludo inicial con delay
+        # 2. LLAMADA CONTESTADA: Saludo inicial con delay técnico
         elif event_type == "call.answered":
-            time.sleep(1.5) # Espera técnica para que el audio conecte bien
+            time.sleep(1.5) 
             hablar(call_id, "Welcome to your English practice. How can I help you today?")
 
         # 3. FIN DE AUDIO DE IA: Activar escucha (Gather)
         elif event_type == "call.speak.ended":
-            client.calls.gather_using_ai(
-                call_control_id=call_id, 
+            client.call_control.gather_using_ai(
+                call_id, 
                 parameters={"language": "en-US"}
             )
 
@@ -56,24 +55,23 @@ async def webhook(request: Request):
                 print(f"Usuario dijo: {transcripcion}")
                 respuesta = generar_respuesta(transcripcion)
                 hablar(call_id, respuesta)
-                restar_minuto(phone) # Descontamos 1 minuto
+                restar_minuto(phone) # Descontamos 1 minuto en Supabase
             else:
                 hablar(call_id, "I'm sorry, I didn't hear you. Could you repeat that?")
 
     except Exception as e:
-        print(f"Error en Webhook: {e}")
+        print(f"Error detectado en Webhook: {e}")
 
     return Response(status_code=200)
 
 def hablar(call_id, texto):
-    """Función auxiliar para enviar comandos de voz."""
+    """Función para enviar comandos de voz usando la sintaxis V4."""
     try:
-        client.calls.speak(
-            call_control_id=call_id,
+        client.call_control.speak(
+            call_id,
             payload=texto,
             voice="female",
             language="en-US"
         )
     except Exception as e:
         print(f"Error al ejecutar speak: {e}")
-
