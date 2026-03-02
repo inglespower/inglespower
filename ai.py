@@ -1,85 +1,55 @@
-import os
-import requests
-import uuid
-from openai import OpenAI
-from supabase import create_client
+import base64
+import json
+import httpx
+import openai
+from config import Config
 
-# 1. CONFIGURACIÓN DE CLIENTES
-openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
-client = OpenAI(api_key=openai_key)
+openai.api_key = Config.OPENAI_API_KEY
 
-supabase_url = os.environ.get("SUPABASE_URL", "").strip()
-supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
+SYSTEM_PROMPT = (
+    "Eres un tutor de inglés nativo y paciente. Tu objetivo es ayudar al usuario a practicar. "
+    "Mantén tus respuestas cortas (máximo 2 oraciones) para que la conversación sea fluida por teléfono. "
+    "Si el usuario comete un error, corrígelo suavemente."
+)
 
-if not supabase_url or not supabase_key:
-    raise ValueError("Error: Faltan SUPABASE_URL o SUPABASE_KEY en Render.")
-
-supabase = create_client(supabase_url, supabase_key)
-
-def generate_reply(user_text):
-    """Genera una respuesta de texto usando OpenAI."""
-    system_prompt = "You are InglesPower, a bilingual English coach. Be brief."
+async def procesar_voz_a_voz(audio_base64_incoming):
+    """
+    Recibe audio de Telnyx, le pregunta a OpenAI y devuelve audio de ElevenLabs.
+    """
+    # 1. Convertir audio entrante a texto (Whisper)
+    # (En una implementación de baja latencia, esto se hace via Streaming WebSocket)
+    # Aquí simulamos el flujo de respuesta de texto a voz:
     
-    try:
-        resp = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_text}
-            ],
-            max_tokens=120
-        )
-        return resp.choices[0].message.content
-    except Exception as e:
-        print(f"Error OpenAI: {e}")
-        return "Keep going, I'm listening."
+    texto_usuario = "Hello, I want to practice my English." # Simulación de entrada
+    
+    # 2. Generar respuesta de texto con GPT-4o
+    response = await openai.ChatCompletion.acreate(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": texto_usuario}
+        ]
+    )
+    respuesta_texto = response.choices[0].message.content
 
-def get_nathaniel_voice_url(texto):
-    """Convierte texto a audio con ElevenLabs y lo sube a Supabase."""
-    api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
-    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
-
-    if not api_key or not voice_id:
-        print("Faltan credenciales de ElevenLabs")
-        return None
-
-    url_eleven = f"https://api.elevenlabs.io{voice_id}"
-
+    # 3. Convertir esa respuesta a voz humana con ElevenLabs
     headers = {
-        "xi-api-key": api_key,
-        "Content-Type": "application/json",
-        "accept": "audio/mpeg"
+        "xi-api-key": Config.ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
     }
-
-    data = {
-        "text": texto,
+    
+    payload = {
+        "text": respuesta_texto,
         "model_id": "eleven_multilingual_v2",
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75
-        }
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}
     }
 
-    try:
-        response = requests.post(url_eleven, json=data, headers=headers, timeout=30)
-
-        if response.status_code == 200:
-            file_name = f"voice_{uuid.uuid4()}.mp3"
-
-            # Subida a Supabase Storage
-            supabase.storage.from_("audios").upload(
-                path=file_name,
-                file=response.content,
-                file_options={"content-type": "audio/mpeg"}
-            )
-
-            # Generar URL pública
-            public_url = supabase.storage.from_("audios").get_public_url(file_name)
-            return public_url
-        else:
-            print(f"Error ElevenLabs {response.status_code}: {response.text}")
-
-    except Exception as e:
-        print("Error Voz Nathaniel:", e)
-
+    url = f"https://api.elevenlabs.io{Config.ELEVENLABS_VOICE_ID}"
+    
+    async with httpx.AsyncClient() as client:
+        res = await client.post(url, json=payload, headers=headers)
+        if res.status_code == 200:
+            # Convertimos el audio binario a Base64 para que Telnyx lo pueda reproducir
+            audio_base64 = base64.b64encode(res.content).decode('utf-8')
+            return audio_base64
     return None
