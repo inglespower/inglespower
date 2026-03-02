@@ -1,35 +1,39 @@
 # main.py
 from fastapi import FastAPI, Request
 from supabase_client import conectar_db, obtener_minutos, restar_minuto_y_obtener_balance
+import re
 
 app = FastAPI()
 
-# Configuración inicial para usuarios nuevos
 MINUTOS_INICIALES = 10
+PHONE_REGEX = re.compile(r"^\+\d{10,15}$")  # Formato internacional +15555555555
 
 @app.post("/webhook")
-async def webhook(request: Request):
+async def telnyx_call_webhook(request: Request):
     """
-    Endpoint para recibir el número de teléfono desde un webhook.
-    Devuelve mensaje según minutos disponibles.
+    Endpoint para manejar llamadas Telnyx.
+    Devuelve acciones TTS según los minutos disponibles.
     """
     try:
         data = await request.json()
     except Exception:
-        return {"message": "Error: no se pudo leer el JSON del request."}
+        return {"actions": [{"say": {"payload": "Error leyendo datos de la llamada."}}]}
 
-    phone = data.get("phone")
+    phone = data.get("from")
     if not phone:
-        return {"message": "Error: no se recibió el teléfono."}
+        return {"actions": [{"say": {"payload": "No se recibió número de teléfono."}}]}
+
+    if not PHONE_REGEX.match(phone):
+        return {"actions": [{"say": {"payload": "Número de teléfono inválido."}}]}
 
     db = conectar_db()
     if db is None:
-        return {"message": "Error: no se pudo conectar a Supabase."}
+        return {"actions": [{"say": {"payload": "Error de conexión a la base de datos."}}]}
 
     # Obtener minutos
     minutos = obtener_minutos(phone)
 
-    # Si el usuario no existe o tiene 0 minutos, lo creamos con saldo inicial
+    # Crear usuario si no existe
     if minutos == 0:
         try:
             existing = db.table("users").select("*").eq("phone", phone).maybe_single().execute()
@@ -40,14 +44,28 @@ async def webhook(request: Request):
                 }).execute()
                 minutos = MINUTOS_INICIALES
         except Exception as e:
-            return {"message": f"Error creando usuario: {e}"}
+            return {"actions": [{"say": {"payload": f"Error creando usuario: {e}"}}]}
 
-    # Responder según el balance
+    # Preparar acción de Telnyx
+    response_actions = []
+
     if minutos > 0:
+        # Restar un minuto
         nuevo_balance = restar_minuto_y_obtener_balance(phone)
-        return {
-            "message": "Hello! I am your AI English tutor...",
-            "nuevo_balance": nuevo_balance
-        }
+        response_actions.append({
+            "say": {
+                "payload": "Hello! I am your AI English tutor.",
+                "voice": "alloy",
+                "language": "en-US"
+            }
+        })
     else:
-        return {"message": "No tienes minutos… por favor recarga."}
+        response_actions.append({
+            "say": {
+                "payload": "No tienes minutos, por favor recarga.",
+                "voice": "alloy",
+                "language": "en-US"
+            }
+        })
+
+    return {"actions": response_actions}
