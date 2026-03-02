@@ -6,9 +6,6 @@ from fastapi import FastAPI, Request, Response
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 
-# Importación directa para evitar errores de atributo en Render
-from telnyx.api_resources.call import Call
-
 app = FastAPI()
 telnyx.api_key = Config.TELNYX_KEY
 
@@ -33,11 +30,11 @@ async def handle_webhook(request: Request):
         if event_type == "call.initiated" and call_id:
             balance = obtener_minutos(from_number)
             if balance > 0:
-                # Comando para contestar la llamada
-                Call.answer(call_id)
+                # Sintaxis para Telnyx 4.x.x
+                telnyx.Call.answer(call_id)
                 
-                # Saludo inicial del tutor
-                Call.speak(
+                # Saludo inicial
+                telnyx.Call.speak(
                     call_id, 
                     payload="Hello! I am your AI English tutor. How can I help you today?", 
                     voice="female", 
@@ -45,9 +42,9 @@ async def handle_webhook(request: Request):
                 )
                 asyncio.create_task(cronometro_cobro(from_number, call_id))
             else:
-                Call.speak(call_id, payload="No tienes minutos. Por favor recarga.", language="es-ES")
+                telnyx.Call.speak(call_id, payload="No tienes minutos. Por favor recarga.", language="es-ES")
                 await asyncio.sleep(4)
-                Call.hangup(call_id)
+                telnyx.Call.hangup(call_id)
     except Exception as e:
         print(f"Error procesando lógica de llamada: {e}")
         
@@ -58,9 +55,9 @@ async def cronometro_cobro(phone, call_id):
         await asyncio.sleep(60)
         restar_minuto(phone)
         if obtener_minutos(phone) <= 0:
-            Call.speak(call_id, payload="Your time is up. Goodbye!", language="en-US")
+            telnyx.Call.speak(call_id, payload="Your time is up. Goodbye!", language="en-US")
             await asyncio.sleep(3)
-            Call.hangup(call_id)
+            telnyx.Call.hangup(call_id)
             break
 
 if __name__ == "__main__":
