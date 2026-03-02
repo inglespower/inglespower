@@ -5,7 +5,6 @@ from fastapi import FastAPI, Request, Response
 from openai import OpenAI
 from supabase_client import get_minutes, subtract_minute
 from ai import generate_reply, get_voice_audio_url
-import json
 
 app = FastAPI()
 
@@ -21,17 +20,16 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 telnyx.api_key = TELNYX_API_KEY
 
 # =========================
-# RUTA GET de prueba
+# Ruta de prueba
 # =========================
 @app.get("/")
 def home():
     return {"status": "English Power AI running"}
 
 # =========================
-# FUNCIONES AUXILIARES
+# Función para transcribir audio (Whisper)
 # =========================
 def transcribe_audio(url):
-    """Transcribe audio usando Whisper"""
     try:
         audio_data = requests.get(url).content
         temp_file = "/tmp/user_audio.mp3"
@@ -53,12 +51,13 @@ def transcribe_audio(url):
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
-    # Simplemente parsear JSON, sin WebhookEvent
     try:
         body = await request.json()
-    except Exception as e:
-        print("Error parsing JSON:", e)
-        return Response(status_code=400)
+    except Exception:
+        # Si el webhook viene vacío o malformado, imprimir y responder 200
+        body_bytes = await request.body()
+        print("Webhook vacío o malformado:", body_bytes)
+        return Response(status_code=200)
 
     event_type = body.get("data", {}).get("event_type")
     payload = body.get("data", {}).get("payload", {})
