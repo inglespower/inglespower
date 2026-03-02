@@ -18,6 +18,9 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
+# Diccionario para evitar activar el asistente dos veces en la misma llamada
+asistente_activo = {}
+
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
@@ -31,8 +34,8 @@ async def webhook(request: Request):
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                print(f"Llamada aceptada. Saldo: {minutos}")
                 client.calls.actions.answer(call_id)
+                asistente_activo[call_id] = False # Inicializamos estado
             else:
                 client.calls.actions.hangup(call_id)
 
@@ -40,24 +43,27 @@ async def webhook(request: Request):
             time.sleep(1.5)
             hablar(call_id, "Welcome to your English practice. How can I help you today?")
 
+        # 3. ACTIVAR ESCUCHA (Con validación para evitar Error 90061)
         elif event_type in ["call.speak.ended", "call.playback.ended"]:
-            # Corrección Error 422: Parámetros obligatorios
-            client.calls.actions.gather_using_ai(
-                call_id, 
-                parameters={
-                    "language": "en-US",
-                    "type": "object",
-                    "properties": {
-                        "user_input": {
-                            "type": "string",
-                            "description": "User response"
-                        }
-                    },
-                    "required": ["user_input"]
-                }
-            )
+            if not asistente_activo.get(call_id, False):
+                asistente_activo[call_id] = True # Marcamos como activo
+                client.calls.actions.gather_using_ai(
+                    call_id, 
+                    parameters={
+                        "language": "en-US",
+                        "type": "object",
+                        "properties": {
+                            "user_input": {
+                                "type": "string",
+                                "description": "User response"
+                            }
+                        },
+                        "required": ["user_input"]
+                    }
+                )
 
         elif event_type == "call.gather.ended":
+            asistente_activo[call_id] = False # Liberamos para la siguiente respuesta
             transcripcion = payload.get("transcription")
             if transcripcion:
                 respuesta = generar_respuesta(transcripcion)
@@ -65,6 +71,10 @@ async def webhook(request: Request):
                 restar_minuto(phone)
             else:
                 hablar(call_id, "I'm sorry, I didn't hear you.")
+
+        # Limpiar memoria cuando la llamada termina
+        elif event_type == "call.hangup":
+            asistente_activo.pop(call_id, None)
 
     except Exception as e:
         print(f"Error Webhook: {e}")
