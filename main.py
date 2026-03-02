@@ -1,128 +1,111 @@
 import os
 import uuid
+import json
 import requests
-from fastapi import FastAPI, Request, Response
-from openai import OpenAI
+from fastapi import FastAPI, Request
 from supabase import create_client
-import telnyx
+from openai import OpenAI
 
-from ai import generate_reply, get_voice_audio_url
-from supabase_client import get_minutes, subtract_minute
+app = FastAPI()
 
-# =========================
-# CONFIGURACIÓN CLIENTES
-# =========================
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-telnyx.api_key = os.environ.get("TELNYX_API_KEY")
-TELNYX_PHONE_NUMBER = os.environ.get("TELNYX_PHONE_NUMBER")
+# ----- Configuración OpenAI -----
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
+# ----- Configuración Supabase -----
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-app = FastAPI()
+# ----- Configuración ElevenLabs -----
+ELEVEN_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+ELEVEN_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID")
 
+# ----- Configuración Telnyx -----
+TELNYX_API_KEY = os.environ.get("TELNYX_API_KEY")
+TELNYX_PHONE_NUMBER = os.environ.get("TELNYX_PHONE_NUMBER")
 
-# ==========================================
-# FUNCIONES AUXILIARES
-# ==========================================
-def transcribe_audio(url):
-    try:
-        audio_data = requests.get(url).content
-        temp_filename = f"/tmp/{uuid.uuid4()}.mp3"
-        with open(temp_filename, "wb") as f:
-            f.write(audio_data)
-        
-        with open(temp_filename, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_file
-            )
-        return transcript.text
-    except Exception as e:
-        print(f"Error en transcripción: {e}")
+# ---------------- Funciones ----------------
+
+def generate_reply(text: str) -> str:
+    """
+    Genera la respuesta de la AI usando ChatGPT
+    """
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are English Power, a friendly English coach. Correct mistakes and encourage the student. Be brief."
+            },
+            {"role": "user", "content": text}
+        ],
+        max_tokens=120
+    )
+    return response.choices[0].message.content
+
+def get_voice_audio_url(text: str) -> str:
+    """
+    Convierte texto a voz con ElevenLabs y sube a Supabase
+    """
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
+    headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
+    data = {"text": text, "model_id": "eleven_multilingual_v2"}
+
+    resp = requests.post(url, json=data, headers=headers)
+    if resp.status_code != 200:
+        print("ElevenLabs error:", resp.text)
         return None
 
+    file_name = f"reply_{uuid.uuid4()}.mp3"
+    supabase.storage.from_("audios").upload(
+        path=file_name,
+        file=resp.content,
+        file_options={"content-type": "audio/mpeg"}
+    )
+    public_url = supabase.storage.from_("audios").get_public_url(file_name)
+    return public_url
 
-# ==========================================
-# WEBHOOK PRINCIPAL
-# ==========================================
+async def transcribe_audio(file_url: str) -> str:
+    """
+    Transcribe audio usando Whisper de OpenAI
+    """
+    audio_resp = requests.get(file_url)
+    audio_bytes = audio_resp.content
+
+    transcript = client.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_bytes
+    )
+    return transcript.text
+
+# ---------------- Rutas ----------------
+
 @app.post("/webhook")
-async def telnyx_webhook(request: Request):
-    # Telnyx envía application/x-www-form-urlencoded, no JSON
-    form = await request.form()
-    form_dict = dict(form)
-    
-    event_type = form_dict.get("EventType") or form_dict.get("event_type")
-    call_control_id = form_dict.get("CallControlId") or form_dict.get("call_control_id")
-    from_phone = form_dict.get("From")
-    
-    # 1. Contestar la llamada
-    if event_type == "call.initiated":
-        telnyx.Call.answer(call_control_id=call_control_id)
+async def webhook(request: Request):
+    """
+    Webhook que recibe eventos de Telnyx (llamadas entrantes)
+    """
+    try:
+        body_bytes = await request.body()
+        body_text = body_bytes.decode("utf-8")
+        # Telnyx envía datos como x-www-form-urlencoded, no JSON
+        data = dict(item.split("=") for item in body_text.split("&"))
 
-    # 2. Saludo inicial
-    elif event_type == "call.answered":
-        minutes = get_minutes(from_phone)
-        if minutes <= 0:
-            telnyx.Call.speak(
-                call_control_id=call_control_id,
-                payload="You have no minutes left. Please recharge. Goodbye.",
-                voice="female", language="en-US"
-            )
-        else:
-            telnyx.Call.speak(
-                call_control_id=call_control_id,
-                payload="Hello! I'm your English coach. How can I help you practice today?",
-                voice="female", language="en-US"
-            )
+        audio_url = data.get("RecordingUrl")  # Suponiendo que Telnyx manda RecordingUrl
+        if not audio_url:
+            return {"error": "No audio found in webhook"}
 
-    # 3. Grabar usuario
-    elif event_type in ["call.speak.ended", "call.playback.ended"]:
-        telnyx.Call.record_start(
-            call_control_id=call_control_id,
-            format="mp3",
-            channels="single",
-            play_beep=True,
-            limit_seconds=15
-        )
+        user_text = await transcribe_audio(audio_url)
+        ai_text = generate_reply(user_text)
+        ai_audio_url = get_voice_audio_url(ai_text)
 
-    # 4. Procesar grabación
-    elif event_type == "call.recording.saved":
-        recording_url = form_dict.get("RecordingUrl") or form_dict.get("recording_urls")
-        if recording_url:
-            user_text = transcribe_audio(recording_url)
-            if user_text:
-                subtract_minute(from_phone)
-                reply_text = generate_reply(user_text)
-                audio_url = get_voice_audio_url(reply_text)
-                if audio_url:
-                    telnyx.Call.playback_start(
-                        call_control_id=call_control_id,
-                        audio_url=audio_url
-                    )
-                else:
-                    telnyx.Call.speak(
-                        call_control_id=call_control_id,
-                        payload=reply_text,
-                        voice="female",
-                        language="en-US"
-                    )
-            else:
-                telnyx.Call.speak(
-                    call_control_id=call_control_id,
-                    payload="I didn't catch that. Please try again.",
-                    voice="female",
-                    language="en-US"
-                )
+        return {"reply_text": ai_text, "reply_audio": ai_audio_url}
 
-    return Response(status_code=200)
+    except Exception as e:
+        print("Error en webhook:", e)
+        return {"error": str(e)}
 
-
-# ==========================================
-# EJECUCIÓN EN RENDER
-# ==========================================
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port, timeout_keep_alive=60)
+@app.get("/")
+async def root():
+    return {"status": "English Power AI running ✅"}
