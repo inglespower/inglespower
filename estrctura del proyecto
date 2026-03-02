@@ -1,9 +1,10 @@
-inglespower/
-│
-├── main.py
-├── ai.py
-├── supabase_client.py
-├── config.py
-├── requirements.txt
-├── render.yaml
-└── README.md
+PROYECTO: TUTOR DE INGLÉS IA TELEFÓNICO
+---------------------------------------
+- ai.py: Procesa el pensamiento (OpenAI) y la voz (ElevenLabs).
+- main.py: Gestiona la entrada de llamadas y flujo del servidor.
+- config.py: Almacena las API Keys de forma segura.
+- supabase_client.py: Conecta con la base de datos para cobrar minutos.
+- telnyx_sms.py: Envía el link de pago por SMS.
+- render.yaml: Instrucciones para desplegar en la nube.
+- requirements.txt: Librerías de Python necesarias.
+- estructura del proyecto: Este documento guía.
