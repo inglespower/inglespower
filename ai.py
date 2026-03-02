@@ -4,6 +4,7 @@ from config import Config
 
 # Inicialización de clientes
 client_openai = OpenAI(api_key=Config.OPENAI_API_KEY)
+# El cliente de ElevenLabs se inicializa así
 client_eleven = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 
 def generar_respuesta(texto_usuario):
@@ -22,15 +23,16 @@ def generar_respuesta(texto_usuario):
         return "I am sorry, I had a problem processing that."
 
 def texto_a_voz(texto, filepath):
-    """Convierte texto a audio con ElevenLabs usando la sintaxis de cliente corregida."""
+    """Convierte texto a audio con ElevenLabs usando la sintaxis corregida."""
     try:
-        # CORRECCIÓN: Se usa client_eleven.generate y se itera sobre el resultado
+        # CORRECCIÓN DEFINITIVA: Se usa client_eleven.generate
         audio_generator = client_eleven.generate(
             text=texto,
             voice="Rachel", 
             model="eleven_multilingual_v2"
         )
         
+        # Guardar el flujo de audio en el archivo
         with open(filepath, "wb") as f:
             for chunk in audio_generator:
                 if chunk:
