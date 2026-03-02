@@ -1,7 +1,10 @@
 services:
   - type: web
-    name: english-tutor-api
+    name: english-tutor-ia
     env: python
     pythonVersion: 3.10.12
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
+    startCommand: python main.py
+    envVars:
+      - key: PORT
+        value: 10000
