@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request, Response
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 
-# IMPORTACIÓN DIRECTA PARA EVITAR EL ERROR DE ATRIBUTO
+# Importación directa para evitar errores de atributo en Render
 from telnyx.api_resources.call import Call
 
 app = FastAPI()
@@ -33,10 +33,10 @@ async def handle_webhook(request: Request):
         if event_type == "call.initiated" and call_id:
             balance = obtener_minutos(from_number)
             if balance > 0:
-                # USAMOS LA CLAVE IMPORTADA DIRECTAMENTE
+                # Comando para contestar la llamada
                 Call.answer(call_id)
                 
-                # Saludo inicial
+                # Saludo inicial del tutor
                 Call.speak(
                     call_id, 
                     payload="Hello! I am your AI English tutor. How can I help you today?", 
@@ -66,4 +66,3 @@ async def cronometro_cobro(phone, call_id):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-``` [1.1]
