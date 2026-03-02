@@ -30,7 +30,7 @@ async def handle_webhook(request: Request):
         if event_type == "call.initiated" and call_id:
             balance = obtener_minutos(from_number)
             if balance > 0:
-                # Sintaxis para Telnyx 4.x.x
+                # SINTAXIS PARA TELNYX 4.X.X
                 telnyx.Call.answer(call_id)
                 
                 # Saludo inicial
