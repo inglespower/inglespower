@@ -6,6 +6,9 @@ from fastapi import FastAPI, Request, Response
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 
+# IMPORTACIÓN DIRECTA PARA EVITAR EL ERROR DE ATRIBUTO
+from telnyx.api_resources.call import Call
+
 app = FastAPI()
 telnyx.api_key = Config.TELNYX_KEY
 
@@ -30,21 +33,21 @@ async def handle_webhook(request: Request):
         if event_type == "call.initiated" and call_id:
             balance = obtener_minutos(from_number)
             if balance > 0:
-                # Sintaxis correcta para Telnyx 4.59.0
-                telnyx.Call.answer(call_id)
+                # USAMOS LA CLAVE IMPORTADA DIRECTAMENTE
+                Call.answer(call_id)
                 
                 # Saludo inicial
-                telnyx.Call.speak(
+                Call.speak(
                     call_id, 
-                    payload="Hello! I'm your AI English tutor. Let's practice!", 
+                    payload="Hello! I am your AI English tutor. How can I help you today?", 
                     voice="female", 
                     language="en-US"
                 )
                 asyncio.create_task(cronometro_cobro(from_number, call_id))
             else:
-                telnyx.Call.speak(call_id, payload="No tienes minutos.", language="es-ES")
-                await asyncio.sleep(3)
-                telnyx.Call.hangup(call_id)
+                Call.speak(call_id, payload="No tienes minutos. Por favor recarga.", language="es-ES")
+                await asyncio.sleep(4)
+                Call.hangup(call_id)
     except Exception as e:
         print(f"Error procesando lógica de llamada: {e}")
         
@@ -55,11 +58,12 @@ async def cronometro_cobro(phone, call_id):
         await asyncio.sleep(60)
         restar_minuto(phone)
         if obtener_minutos(phone) <= 0:
-            telnyx.Call.speak(call_id, payload="Your time is up. Goodbye!", language="en-US")
+            Call.speak(call_id, payload="Your time is up. Goodbye!", language="en-US")
             await asyncio.sleep(3)
-            telnyx.Call.hangup(call_id)
+            Call.hangup(call_id)
             break
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+``` [1.1]
