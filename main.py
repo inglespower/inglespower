@@ -1,6 +1,5 @@
 import os
 import uuid
-import json
 import requests
 from fastapi import FastAPI, Request
 from supabase import create_client
@@ -28,16 +27,11 @@ TELNYX_PHONE_NUMBER = os.environ.get("TELNYX_PHONE_NUMBER")
 # ---------------- Funciones ----------------
 
 def generate_reply(text: str) -> str:
-    """
-    Genera la respuesta de la AI usando ChatGPT
-    """
+    """Genera respuesta de la AI usando GPT"""
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {
-                "role": "system",
-                "content": "You are English Power, a friendly English coach. Correct mistakes and encourage the student. Be brief."
-            },
+            {"role": "system", "content": "You are English Power, a friendly English coach. Correct mistakes and encourage the student. Be brief."},
             {"role": "user", "content": text}
         ],
         max_tokens=120
@@ -45,9 +39,7 @@ def generate_reply(text: str) -> str:
     return response.choices[0].message.content
 
 def get_voice_audio_url(text: str) -> str:
-    """
-    Convierte texto a voz con ElevenLabs y sube a Supabase
-    """
+    """Convierte texto a voz con ElevenLabs y sube a Supabase"""
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
     headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
     data = {"text": text, "model_id": "eleven_multilingual_v2"}
@@ -67,9 +59,7 @@ def get_voice_audio_url(text: str) -> str:
     return public_url
 
 async def transcribe_audio(file_url: str) -> str:
-    """
-    Transcribe audio usando Whisper de OpenAI
-    """
+    """Transcribe audio usando Whisper/OpenAI"""
     audio_resp = requests.get(file_url)
     audio_bytes = audio_resp.content
 
@@ -84,20 +74,23 @@ async def transcribe_audio(file_url: str) -> str:
 @app.post("/webhook")
 async def webhook(request: Request):
     """
-    Webhook que recibe eventos de Telnyx (llamadas entrantes)
+    Webhook de Telnyx: recibe llamada entrante
     """
     try:
-        body_bytes = await request.body()
-        body_text = body_bytes.decode("utf-8")
-        # Telnyx envía datos como x-www-form-urlencoded, no JSON
-        data = dict(item.split("=") for item in body_text.split("&"))
-
-        audio_url = data.get("RecordingUrl")  # Suponiendo que Telnyx manda RecordingUrl
+        # Telnyx envía x-www-form-urlencoded, no JSON
+        form = await request.form()
+        data = dict(form)
+        
+        audio_url = data.get("RecordingUrl")  # Telnyx manda URL de grabación
         if not audio_url:
+            print("Webhook vacío o malformado:", data)
             return {"error": "No audio found in webhook"}
 
+        # Transcribe el audio
         user_text = await transcribe_audio(audio_url)
+        # Genera la respuesta de la AI
         ai_text = generate_reply(user_text)
+        # Convierte la respuesta a audio y sube
         ai_audio_url = get_voice_audio_url(ai_text)
 
         return {"reply_text": ai_text, "reply_audio": ai_audio_url}
