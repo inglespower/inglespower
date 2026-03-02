@@ -1,19 +1,22 @@
 import time
+import os
 import telnyx
 from telnyx import Telnyx
 from fastapi import FastAPI, Request, Response
+from fastapi.staticfiles import StaticFiles
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
-from ai import generar_respuesta
+from ai import generar_respuesta, texto_a_voz
 
 app = FastAPI()
 
-# Inicialización correcta para Telnyx v4+
-client = Telnyx(api_key=Config.TELNYX_API_KEY)
+# Para que Telnyx pueda acceder a los archivos de audio que generamos
+if not os.path.exists("static"):
+    os.makedirs("static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/")
-async def health():
-    return {"status": "online", "service": "InglesPower AI"}
+client = Telnyx(api_key=Config.TELNYX_API_KEY)
+MI_URL_PUBLICA = "https://tu-app-en-render.onrender.com" # CAMBIA ESTO POR TU URL DE RENDER
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -25,61 +28,49 @@ async def webhook(request: Request):
         phone = payload.get("from")
         event_type = event.get("event_type")
 
-        # 1. LLAMADA INICIADA: Validar saldo y contestar
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                print(f"Llamada de {phone}. Minutos: {minutos}. Contestando...")
                 client.calls.actions.answer(call_id)
             else:
-                print(f"Sin saldo para {phone}. Colgando.")
                 client.calls.actions.hangup(call_id)
 
-        # 2. LLAMADA CONTESTADA: Saludo inicial con delay de audio
         elif event_type == "call.answered":
             time.sleep(1.5) 
-            hablar(call_id, "Welcome to your English practice. How can I help you today?")
+            hablar(call_id, "Welcome to your English practice. How can I help you?")
 
-        # 3. FIN DE AUDIO DE IA: Activar escucha (Gather con IA)
-        elif event_type == "call.speak.ended":
-            # CORRECCIÓN DEFINITIVA PARA ERROR 422:
-            # Telnyx v4 requiere 'parameters' con estructura de esquema (properties).
+        elif event_type == "call.speak.ended" or event_type == "call.playback.ended":
             client.calls.actions.gather_using_ai(
                 call_id, 
-                parameters={
-                    "language": "en-US",
-                    "voice_model": "telnyx_voice_en_us_1"
-                }
+                parameters={"language": "en-US", "type": "chat_conversational"}
             )
 
-        # 4. USUARIO TERMINA DE HABLAR: Procesar respuesta con OpenAI
         elif event_type == "call.gather.ended":
-            # En v4 la transcripción suele venir dentro de 'transcription' en el payload
             transcripcion = payload.get("transcription")
-            
             if transcripcion:
-                print(f"Usuario dijo: {transcripcion}")
-                respuesta = generar_respuesta(transcripcion)
-                hablar(call_id, respuesta)
-                restar_minuto(phone) # Descontamos 1 minuto en Supabase
+                respuesta_texto = generar_respuesta(transcripcion)
+                hablar(call_id, respuesta_texto)
+                restar_minuto(phone)
             else:
-                print("No se detectó transcripción, pidiendo repetir...")
-                hablar(call_id, "I'm sorry, I didn't hear you. Could you repeat that?")
+                hablar(call_id, "I didn't hear you. Please repeat.")
 
     except Exception as e:
-        # Esto nos dirá en el log de Render exactamente qué línea falla ahora
-        print(f"Error detectado en Webhook: {e}")
-
+        print(f"Error: {e}")
     return Response(status_code=200)
 
 def hablar(call_id, texto):
-    """Función para enviar comandos de voz usando la sintaxis V4."""
+    """Genera audio con ElevenLabs y le pide a Telnyx que lo reproduzca."""
     try:
-        client.calls.actions.speak(
-            call_id,
-            payload=texto,
-            voice="female",
-            language="en-US"
-        )
+        # 1. Crear el audio
+        filename = f"static/audio_{int(time.time())}.mp3"
+        archivo_generado = texto_a_voz(texto, filename)
+        
+        if archivo_generado:
+            # 2. Pedirle a Telnyx que reproduzca la URL del audio
+            audio_url = f"{MI_URL_PUBLICA}/{archivo_generado}"
+            client.calls.actions.playback_start(call_id, audio_url=audio_url)
+        else:
+            # Fallback a voz robótica si ElevenLabs falla
+            client.calls.actions.speak(call_id, payload=texto, voice="female", language="en-US")
     except Exception as e:
-        print(f"Error al ejecutar speak: {e}")
+        print(f"Error al hablar: {e}")
