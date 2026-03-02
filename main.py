@@ -1,13 +1,15 @@
 import os
 import uvicorn
-import telnyx
 import asyncio
 from fastapi import FastAPI, Request, Response
+from telnyx import Telnyx
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 
 app = FastAPI()
-telnyx.api_key = Config.TELNYX_KEY
+
+# Cliente nuevo Telnyx 4.x
+telnyx_client = Telnyx(api_key=Config.TELNYX_KEY)
 
 @app.get("/")
 @app.head("/")
@@ -20,45 +22,66 @@ async def handle_webhook(request: Request):
         body = await request.body()
         if not body:
             return Response(content="OK", status_code=200)
+
         data = await request.json()
-        
-        payload = data.get('data', {}).get('payload', {})
-        event_type = data.get('data', {}).get('event_type')
-        call_id = payload.get('call_control_id')
-        from_number = payload.get('from')
+        payload = data.get("data", {}).get("payload", {})
+        event_type = data.get("data", {}).get("event_type")
+        call_id = payload.get("call_control_id")
+        from_number = payload.get("from")
 
         if event_type == "call.initiated" and call_id:
+
             balance = obtener_minutos(from_number)
+
             if balance > 0:
-                # SINTAXIS PARA TELNYX 4.X.X
-                telnyx.Call.answer(call_id)
-                
-                # Saludo inicial
-                telnyx.Call.speak(
-                    call_id, 
-                    payload="Hello! I am your AI English tutor. How can I help you today?", 
-                    voice="female", 
+
+                # ✅ Answer
+                telnyx_client.calls.answer(call_control_id=call_id)
+
+                # ✅ Speak
+                telnyx_client.calls.speak(
+                    call_control_id=call_id,
+                    payload="Hello! I am your AI English tutor. How can I help you today?",
+                    voice="female",
                     language="en-US"
                 )
+
                 asyncio.create_task(cronometro_cobro(from_number, call_id))
+
             else:
-                telnyx.Call.speak(call_id, payload="No tienes minutos. Por favor recarga.", language="es-ES")
+                telnyx_client.calls.speak(
+                    call_control_id=call_id,
+                    payload="No tienes minutos. Por favor recarga.",
+                    language="es-ES"
+                )
+
                 await asyncio.sleep(4)
-                telnyx.Call.hangup(call_id)
+
+                telnyx_client.calls.hangup(call_control_id=call_id)
+
     except Exception as e:
         print(f"Error procesando lógica de llamada: {e}")
-        
+
     return Response(status_code=200)
+
 
 async def cronometro_cobro(phone, call_id):
     while True:
         await asyncio.sleep(60)
         restar_minuto(phone)
+
         if obtener_minutos(phone) <= 0:
-            telnyx.Call.speak(call_id, payload="Your time is up. Goodbye!", language="en-US")
+            telnyx_client.calls.speak(
+                call_control_id=call_id,
+                payload="Your time is up. Goodbye!",
+                language="en-US"
+            )
+
             await asyncio.sleep(3)
-            telnyx.Call.hangup(call_id)
+
+            telnyx_client.calls.hangup(call_control_id=call_id)
             break
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
