@@ -1,14 +1,11 @@
 import telnyx
-import os
+from config import Config
 
-# Telnyx usa estas llaves que ya configuramos en Render
-telnyx.api_key = os.getenv("TELNYX_API_KEY")
-TELNYX_PHONE_NUMBER = os.getenv("TELNYX_PHONE_NUMBER")
+telnyx.api_key = Config.TELNYX_API_KEY
 
-def send_sms(to, body):
-    # Esta función enviará el mensaje usando tu saldo de Telnyx
-    return telnyx.Message.create(
-        from_=TELNYX_PHONE_NUMBER,
-        to=to,
-        text=body
+def enviar_sms_recarga(numero):
+    telnyx.Message.create(
+        from_="+1XXXXXXXXXX", # Tu numero de Telnyx
+        to=numero,
+        text=f"Te has quedado sin minutos para tu tutor de inglés. Recarga aquí: {Config.RECHARGE_URL}"
     )
