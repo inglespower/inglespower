@@ -15,14 +15,12 @@ app = FastAPI()
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 telnyx.api_key = os.environ.get("TELNYX_API_KEY")
 
-
 # =========================
 # RUTA GET de prueba
 # =========================
 @app.get("/")
 def home():
     return {"status": "English Power AI running"}
-
 
 # =========================
 # FUNCIONES AUXILIARES
@@ -45,7 +43,6 @@ def transcribe_audio(url):
         print("Error transcribing audio:", e)
         return None
 
-
 # =========================
 # WEBHOOK TELNYX
 # =========================
@@ -54,8 +51,10 @@ async def webhook(request: Request):
     try:
         body = await request.json()
     except json.JSONDecodeError:
-        # Body vacío o inválido
         return Response(status_code=200)
+
+    # 🔹 DEBUG: imprimir todo el JSON recibido
+    print("FULL BODY:", body)
 
     event = body.get("data", {})
     event_type = event.get("event_type")
@@ -71,13 +70,13 @@ async def webhook(request: Request):
     # =========================
     # 1️⃣ Contestamos la llamada
     # =========================
-    if event_type == "call.initiated":
+    if event_type == "call.initiated" and call_control_id:
         telnyx.Call.answer(call_control_id=call_control_id)
 
     # =========================
     # 2️⃣ Saludo inicial
     # =========================
-    elif event_type == "call.answered":
+    elif event_type == "call.answered" and call_control_id:
         minutes = get_minutes(phone)
 
         if minutes <= 0:
@@ -98,7 +97,7 @@ async def webhook(request: Request):
     # =========================
     # 3️⃣ Después de hablar → grabar
     # =========================
-    elif event_type in ["call.speak.ended", "call.playback.ended"]:
+    elif event_type in ["call.speak.ended", "call.playback.ended"] and call_control_id:
         telnyx.Call.record_start(
             call_control_id=call_control_id,
             format="mp3",
@@ -110,7 +109,7 @@ async def webhook(request: Request):
     # =========================
     # 4️⃣ Procesar grabación
     # =========================
-    elif event_type == "call.recording.saved":
+    elif event_type == "call.recording.saved" and call_control_id:
         recording_url = payload.get("recording_urls", {}).get("mp3")
         if not recording_url:
             return Response(status_code=200)
@@ -148,7 +147,6 @@ async def webhook(request: Request):
             )
 
     return Response(status_code=200)
-
 
 # =========================
 # RENDER
