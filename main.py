@@ -1,87 +1,83 @@
 import os
-from fastapi import FastAPI, Request, Response
-from twilio.twiml.voice_response import VoiceResponse, Gather
-from supabase_client import get_minutes, subtract_minute, add_minutes
-from twilio_client import send_sms
-from ai import generate_reply, get_nathaniel_voice_url
+import requests
+import uuid
+from openai import OpenAI
+from supabase import create_client
+from fastapi import FastAPI, Request # O tu framework correspondiente
 
 app = FastAPI()
 
-@app.post("/voice")
-async def voice(request: Request):
-form = await request.form()
-phone = form.get("From") or form.get("from")
-resp = VoiceResponse()
+# 1. CONFIGURACIÓN DE CLIENTES
+openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+client = OpenAI(api_key=openai_key)
 
-# 1. VERIFICACIÓN DE MINUTOS
-minutes = get_minutes(phone)
-if minutes <= 0:
-resp.say("You have no minutes. Please recharge your account at our website. Thank you.", voice="alice")
-return Response(content=str(resp), media_type="application/xml")
+supabase_url = os.environ.get("SUPABASE_URL", "").strip()
+supabase_key = os.environ.get("SUPABASE_KEY", "").strip()
+supabase = create_client(supabase_url, supabase_key)
 
-# 2. SALUDO INICIAL (MEJORADO)
-# Agregamos speechTimeout="3" y profanityFilter="false" para mejor captura
-gather = Gather(
-input="speech",
-action="/process",
-method="POST",
-speechTimeout="3", # Espera 3 segundos de silencio antes de procesar
-language="en-US",
-enhanced=True, # Mayor calidad de reconocimiento
-speechModel="phone_call" # Optimizado para llamadas telefónicas
-)
-gather.say("Hello! I am your English Power coach. How can I help you practice today?", voice="alice")
-resp.append(gather)
+# 2. FUNCIONES DE LÓGICA
+def generate_reply(user_text):
+    """Genera respuesta con OpenAI (v1.0+)"""
+    system_prompt = "You are InglesPower, a bilingual English coach. Be brief."
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text}
+            ],
+            max_tokens=120
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        print(f"Error OpenAI: {e}")
+        return "Keep going, I'm listening."
 
-return Response(content=str(resp), media_type="application/xml")
+def get_nathaniel_voice_url(texto):
+    """Convierte texto a audio y sube a Supabase"""
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
 
-@app.post("/process")
-async def process(request: Request):
-form = await request.form()
-phone = form.get("From") or form.get("from")
-speech = form.get("SpeechResult", "") # Aquí llega lo que dijiste
-resp = VoiceResponse()
+    if not api_key or not voice_id:
+        return None
 
-# Si Twilio no entendió nada, volvemos a preguntar en lugar de fallar
-if not speech:
-gather = Gather(input="speech", action="/process", method="POST", speechTimeout="3", language="en-US")
-gather.say("I'm sorry, I didn't catch that. Could you repeat it?", voice="alice")
-resp.append(gather)
-return Response(content=str(resp), media_type="application/xml")
+    url_eleven = f"https://api.elevenlabs.io{voice_id}"
+    headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
+    data = {
+        "text": texto,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
+    }
 
-# 3. VALIDAR MINUTOS
-if get_minutes(phone) <= 0:
-resp.say("Your time is finished. Goodbye.", voice="alice")
-return Response(content=str(resp), media_type="application/xml")
+    try:
+        response = requests.post(url_eleven, json=data, headers=headers, timeout=30)
+        if response.status_code == 200:
+            file_name = f"voice_{uuid.uuid4()}.mp3"
+            supabase.storage.from_("audios").upload(
+                path=file_name,
+                file=response.content,
+                file_options={"content-type": "audio/mpeg"}
+            )
+            return supabase.storage.from_("audios").get_public_url(file_name)
+    except Exception as e:
+        print("Error Voz:", e)
+    return None
 
-# 4. RESTAMOS EL MINUTO
-subtract_minute(phone)
-
-# 5. GENERAR RESPUESTA Y AUDIO
-reply_text = generate_reply(speech)
-audio_url = get_nathaniel_voice_url(reply_text)
-
-# 6. AVISO DE ÚLTIMO MINUTO
-if get_minutes(phone) == 1:
-resp.say("Note: You have one minute remaining.", voice="alice")
-
-# 7. CONTINUAR CONVERSACIÓN (MEJORADO)
-gather = Gather(
-input="speech",
-action="/process",
-method="POST",
-speechTimeout="3",
-language="en-US",
-enhanced=True,
-speechModel="phone_call"
-)
-
-if audio_url:
-gather.play(audio_url)
-else:
-# Respaldo si falla ElevenLabs
-gather.say(reply_text, voice="alice")
-
-resp.append(gather)
-
-return Response(content=str(resp), media_type="application/xml")
+# 3. WEBHOOK (Aquí estaba el error de indentación de tu imagen)
+@app.post("/webhook")
+async def whatsapp_webhook(request: Request):
+    try:
+        # Indentación corregida: 4 espacios
+        form_data = await request.form()
+        incoming_msg = form_data.get('Body', '').lower()
+        
+        print(f"Mensaje recibido: {incoming_msg}")
+        
+        # Aquí llamarías a tus funciones:
+        # respuesta = generate_reply(incoming_msg)
+        # audio_url = get_nathaniel_voice_url(respuesta)
+        
+        return {"status": "success"}
+    except Exception as e:
+        print(f"Error en webhook: {e}")
+        return {"status": "error", "message": str(e)}
