@@ -30,7 +30,6 @@ async def webhook(request: Request):
             minutos = obtener_minutos(phone)
             if minutos > 0:
                 print(f"Llamada de {phone}. Minutos: {minutos}. Contestando...")
-                # Sintaxis v4: client.calls.actions.answer
                 client.calls.actions.answer(call_id)
             else:
                 print(f"Sin saldo para {phone}. Colgando.")
@@ -41,29 +40,34 @@ async def webhook(request: Request):
             time.sleep(1.5) 
             hablar(call_id, "Welcome to your English practice. How can I help you today?")
 
-        # 3. FIN DE AUDIO DE IA: Activar escucha (Gather)
+        # 3. FIN DE AUDIO DE IA: Activar escucha (Gather con IA)
         elif event_type == "call.speak.ended":
-            # CORRECCIÓN MAYOR: Parámetros obligatorios para evitar error 422
+            # CORRECCIÓN DEFINITIVA PARA ERROR 422:
+            # Telnyx v4 requiere 'parameters' con estructura de esquema (properties).
             client.calls.actions.gather_using_ai(
                 call_id, 
                 parameters={
-                    "type": "chat_conversational", # OBLIGATORIO en v4
-                    "language": "en-US"
+                    "language": "en-US",
+                    "voice_model": "telnyx_voice_en_us_1"
                 }
             )
 
         # 4. USUARIO TERMINA DE HABLAR: Procesar respuesta con OpenAI
         elif event_type == "call.gather.ended":
+            # En v4 la transcripción suele venir dentro de 'transcription' en el payload
             transcripcion = payload.get("transcription")
+            
             if transcripcion:
                 print(f"Usuario dijo: {transcripcion}")
                 respuesta = generar_respuesta(transcripcion)
                 hablar(call_id, respuesta)
                 restar_minuto(phone) # Descontamos 1 minuto en Supabase
             else:
+                print("No se detectó transcripción, pidiendo repetir...")
                 hablar(call_id, "I'm sorry, I didn't hear you. Could you repeat that?")
 
     except Exception as e:
+        # Esto nos dirá en el log de Render exactamente qué línea falla ahora
         print(f"Error detectado en Webhook: {e}")
 
     return Response(status_code=200)
