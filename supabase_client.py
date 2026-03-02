@@ -1,8 +1,8 @@
 from supabase import create_client
 from config import Config
 
-def get_client():
-    """Conexión segura que no tumba el servidor si falta la key al inicio"""
+def conectar_db():
+    """Conexión bajo demanda para evitar errores de inicio en Render"""
     if not Config.SUPABASE_URL or not Config.SUPABASE_KEY:
         return None
     try:
@@ -11,18 +11,19 @@ def get_client():
         return None
 
 def obtener_minutos(phone):
-    client = get_client()
-    if not client: return 0
+    db = conectar_db()
+    if not db: return 0
     try:
-        res = client.table("users").select("balance_minutes").eq("phone", phone).single().execute()
+        res = db.table("users").select("balance_minutes").eq("phone", phone).single().execute()
         return res.data['balance_minutes'] if res.data else 0
     except:
         return 0
 
 def restar_minuto(phone):
-    client = get_client()
-    if client:
+    db = conectar_db()
+    if db:
         try:
-            client.rpc("decrement_minutes", {"user_phone": phone}).execute()
-        except Exception as e:
-            print(f"Error cobro: {e}")
+            # Llama a la función RPC en tu Supabase
+            db.rpc("decrement_minutes", {"user_phone": phone}).execute()
+        except:
+            pass
