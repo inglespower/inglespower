@@ -2,7 +2,7 @@ fastapi
 uvicorn
 supabase
 openai>=1.0.0
-telnyx==0.28.2
+telnyx==4.59.0
 requests
 httpx
 python-dotenv
