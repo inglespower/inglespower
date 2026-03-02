@@ -5,21 +5,33 @@ from fastapi import FastAPI, Request, Response
 from openai import OpenAI
 from supabase_client import get_minutes, subtract_minute
 from ai import generate_reply, get_voice_audio_url
+import json
 
 app = FastAPI()
 
+# =========================
+# CONFIGURACIÓN
+# =========================
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 telnyx.api_key = os.environ.get("TELNYX_API_KEY")
 
 
 # =========================
-# TRANSCRIBIR AUDIO
+# RUTA GET de prueba
+# =========================
+@app.get("/")
+def home():
+    return {"status": "English Power AI running"}
+
+
+# =========================
+# FUNCIONES AUXILIARES
 # =========================
 def transcribe_audio(url):
+    """Transcribe audio usando Whisper"""
     try:
         audio_data = requests.get(url).content
         temp_file = "/tmp/user_audio.mp3"
-
         with open(temp_file, "wb") as f:
             f.write(audio_data)
 
@@ -28,11 +40,9 @@ def transcribe_audio(url):
                 model="whisper-1",
                 file=audio_file
             )
-
         return transcript.text
-
     except Exception as e:
-        print("Transcription error:", e)
+        print("Error transcribing audio:", e)
         return None
 
 
@@ -41,8 +51,12 @@ def transcribe_audio(url):
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
+    try:
+        body = await request.json()
+    except json.JSONDecodeError:
+        # Body vacío o inválido
+        return Response(status_code=200)
 
-    body = await request.json()
     event = body.get("data", {})
     event_type = event.get("event_type")
     payload = event.get("payload", {})
@@ -54,13 +68,16 @@ async def webhook(request: Request):
 
     print("EVENT:", event_type)
 
-    # 1️⃣ Contestamos
+    # =========================
+    # 1️⃣ Contestamos la llamada
+    # =========================
     if event_type == "call.initiated":
         telnyx.Call.answer(call_control_id=call_control_id)
 
-    # 2️⃣ Saludo
+    # =========================
+    # 2️⃣ Saludo inicial
+    # =========================
     elif event_type == "call.answered":
-
         minutes = get_minutes(phone)
 
         if minutes <= 0:
@@ -78,9 +95,10 @@ async def webhook(request: Request):
                 language="en-US"
             )
 
+    # =========================
     # 3️⃣ Después de hablar → grabar
+    # =========================
     elif event_type in ["call.speak.ended", "call.playback.ended"]:
-
         telnyx.Call.record_start(
             call_control_id=call_control_id,
             format="mp3",
@@ -89,15 +107,16 @@ async def webhook(request: Request):
             max_length=20
         )
 
+    # =========================
     # 4️⃣ Procesar grabación
+    # =========================
     elif event_type == "call.recording.saved":
-
         recording_url = payload.get("recording_urls", {}).get("mp3")
-
         if not recording_url:
             return Response(status_code=200)
 
         user_text = transcribe_audio(recording_url)
+        print("USER:", user_text)
 
         if not user_text:
             telnyx.Call.speak(
@@ -111,6 +130,7 @@ async def webhook(request: Request):
         subtract_minute(phone)
 
         reply_text = generate_reply(user_text)
+        print("AI:", reply_text)
 
         audio_url = get_voice_audio_url(reply_text)
 
