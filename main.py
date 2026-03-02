@@ -39,23 +39,24 @@ def get_nathaniel_voice_url(texto):
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
 
     if not api_key or not voice_id:
-        print("Faltan credenciales de ElevenLabs")
+        print("Error: Faltan llaves de ElevenLabs")
         return None
 
-    # URL CORREGIDA: Se agregaron las barras '/' y el path '/v1/text-to-speech/'
+    # URL CORREGIDA: Esto elimina el error de red de tus logs
     url_eleven = f"https://api.elevenlabs.io{voice_id}"
     
     headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
-    body = {
+    data = {
         "text": texto,
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
     }
 
     try:
-        response = requests.post(url_eleven, json=body, headers=headers, timeout=30)
+        response = requests.post(url_eleven, json=data, headers=headers, timeout=30)
         if response.status_code == 200:
             file_name = f"voice_{uuid.uuid4()}.mp3"
+            # Sube el audio al bucket "audios"
             supabase.storage.from_("audios").upload(
                 path=file_name,
                 file=response.content,
@@ -65,20 +66,33 @@ def get_nathaniel_voice_url(texto):
         else:
             print(f"Error ElevenLabs: {response.status_code} - {response.text}")
     except Exception as e:
-        print("Error Voz:", e)
+        print(f"Error Voz: {e}")
     return None
 
-# 3. ENDPOINT PRINCIPAL (Recibe JSON)
+# 3. WEBHOOK FLEXIBLE (Evita el error 'Expecting value')
 @app.post("/webhook")
 async def process_message(request: Request):
+    user_msg = ""
     try:
-        # Lee el JSON que envíe tu app (ej: {"text": "Hello"})
-        data = await request.json()
-        user_msg = data.get('text', '')
+        # Intentamos leer como Formulario (Twilio/WhatsApp)
+        form_data = await request.form()
+        if form_data:
+            user_msg = form_data.get('Body') or form_data.get('text', '')
         
+        # Si no hubo formulario, intentamos leer como JSON
+        if not user_msg:
+            try:
+                json_data = await request.json()
+                user_msg = json_data.get('text', '')
+            except:
+                pass
+
+        if not user_msg:
+            return {"status": "error", "message": "No se recibió texto en Body o JSON"}
+
         print(f"Mensaje recibido: {user_msg}")
         
-        # Lógica de respuesta
+        # Generar respuesta y audio
         respuesta_ia = generate_reply(user_msg)
         audio_url = get_nathaniel_voice_url(respuesta_ia)
         
@@ -87,10 +101,11 @@ async def process_message(request: Request):
             "reply": respuesta_ia,
             "audio": audio_url
         }
+
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error en el proceso: {e}")
         return {"status": "error", "detail": str(e)}
 
 @app.get("/")
 async def root():
-    return {"status": "InglesPower Coach is online"}
+    return {"status": "InglesPower Coach is live!"}
