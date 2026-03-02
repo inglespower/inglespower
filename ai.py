@@ -24,14 +24,13 @@ def generar_respuesta(texto_usuario):
 def texto_a_voz(texto, filepath):
     """Convierte texto a audio con ElevenLabs usando la sintaxis de cliente corregida."""
     try:
-        # CORRECCIÓN: Se usa client_eleven.generate
+        # CORRECCIÓN: Se usa client_eleven.generate y se itera sobre el resultado
         audio_generator = client_eleven.generate(
             text=texto,
             voice="Rachel", 
             model="eleven_multilingual_v2"
         )
         
-        # Guardar el flujo de audio en el archivo
         with open(filepath, "wb") as f:
             for chunk in audio_generator:
                 if chunk:
