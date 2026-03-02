@@ -7,15 +7,16 @@ from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 
 app = FastAPI()
-telnyx.api_key = Config.TELNYX_API_KEY
 
+# Soporte para verificaciones de Render (Evita el error 405)
 @app.get("/")
-async def root():
-    # Esta ruta sirve para que Render vea que el puerto está abierto
-    return {"status": "online", "port": Config.PORT}
+@app.head("/")
+async def health_check():
+    return {"status": "online", "tutor": "AI English"}
 
 @app.post("/webhook")
 async def handle_call(request: Request):
+    telnyx.api_key = Config.TELNYX_KEY
     try:
         data = await request.json()
         payload = data.get('data', {}).get('payload', {})
@@ -23,20 +24,25 @@ async def handle_call(request: Request):
         from_number = payload.get('from')
 
         if data.get('data', {}).get('event_type') == "call.initiated":
-            if obtener_minutos(from_number) > 0:
+            # Validamos minutos en Supabase
+            saldo = obtener_minutos(from_number)
+            if saldo > 0:
                 telnyx.Call.answer(call_id)
-                telnyx.Call.speak(call_id, payload="Hello! Welcome to your AI Tutor.", voice="female", language="en-US")
-                asyncio.create_task(ciclo_cobro(from_number, call_id))
+                # Saludo inicial
+                telnyx.Call.speak(call_id, payload="Hello! I'm your AI tutor. Let's practice English!", voice="female", language="en-US")
+                # Iniciamos cobro automático cada 60 segundos
+                asyncio.create_task(proceso_cobro(from_number, call_id))
             else:
                 telnyx.Call.speak(call_id, payload="No tienes minutos. Recarga en nuestra web.", language="es-ES")
-                await asyncio.sleep(5)
+                await asyncio.sleep(4)
                 telnyx.Call.hangup(call_id)
+                
     except Exception as e:
         print(f"Error: {e}")
-    
+        
     return Response(status_code=200)
 
-async def ciclo_cobro(phone, call_id):
+async def proceso_cobro(phone, call_id):
     while True:
         await asyncio.sleep(60)
         restar_minuto(phone)
@@ -47,5 +53,4 @@ async def ciclo_cobro(phone, call_id):
             break
 
 if __name__ == "__main__":
-    # Arranca el servidor en el puerto que Render exige (10000)
     uvicorn.run(app, host="0.0.0.0", port=Config.PORT)
