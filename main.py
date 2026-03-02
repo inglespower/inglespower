@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request, Response
 from openai import OpenAI
 from supabase_client import get_minutes, subtract_minute
 from ai import generate_reply, get_voice_audio_url
+from telnyx import WebhookEvent
 import json
 
 app = FastAPI()
@@ -12,8 +13,13 @@ app = FastAPI()
 # =========================
 # CONFIGURACIÓN
 # =========================
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-telnyx.api_key = os.environ.get("TELNYX_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
+TELNYX_NUMBER = os.getenv("TELNYX_NUMBER")
+TELNYX_PUBLIC_KEY = os.getenv("TELNYX_PUBLIC_KEY")
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+telnyx.api_key = TELNYX_API_KEY
 
 # =========================
 # RUTA GET de prueba
@@ -48,17 +54,19 @@ def transcribe_audio(url):
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
+    # Validar webhook usando Public Key
+    body_bytes = await request.body()
     try:
-        body = await request.json()
-    except json.JSONDecodeError:
-        return Response(status_code=200)
+        event_obj = WebhookEvent.parse_raw(body_bytes, api_key=None, signing_key=TELNYX_PUBLIC_KEY)
+        body = event_obj.data
+    except Exception:
+        print("⚠️ Webhook invalid signature")
+        return Response(status_code=403)
 
-    # 🔹 DEBUG: imprimir todo el JSON recibido
     print("FULL BODY:", body)
 
-    event = body.get("data", {})
-    event_type = event.get("event_type")
-    payload = event.get("payload", {})
+    event_type = body.get("event_type")
+    payload = body.get("payload", {})
     call_control_id = payload.get("call_control_id")
 
     phone = payload.get("from")
@@ -68,7 +76,7 @@ async def webhook(request: Request):
     print("EVENT:", event_type, "CALL ID:", call_control_id)
 
     # =========================
-    # 1️⃣ Contestamos la llamada
+    # 1️⃣ Contestar llamada
     # =========================
     if event_type == "call.initiated" and call_control_id:
         telnyx.Call.answer(call_control_id=call_control_id)
@@ -103,7 +111,7 @@ async def webhook(request: Request):
             format="mp3",
             channels="single",
             play_beep=True,
-            max_length=30  # puedes ajustar la duración
+            max_length=30
         )
 
     # =========================
