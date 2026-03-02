@@ -5,7 +5,6 @@ from fastapi import FastAPI, Request, Response
 from openai import OpenAI
 from supabase_client import get_minutes, subtract_minute
 from ai import generate_reply, get_voice_audio_url
-from telnyx import WebhookEvent
 import json
 
 app = FastAPI()
@@ -54,19 +53,15 @@ def transcribe_audio(url):
 # =========================
 @app.post("/webhook")
 async def webhook(request: Request):
-    # Validar webhook usando Public Key
-    body_bytes = await request.body()
+    # Simplemente parsear JSON, sin WebhookEvent
     try:
-        event_obj = WebhookEvent.parse_raw(body_bytes, api_key=None, signing_key=TELNYX_PUBLIC_KEY)
-        body = event_obj.data
-    except Exception:
-        print("⚠️ Webhook invalid signature")
-        return Response(status_code=403)
+        body = await request.json()
+    except Exception as e:
+        print("Error parsing JSON:", e)
+        return Response(status_code=400)
 
-    print("FULL BODY:", body)
-
-    event_type = body.get("event_type")
-    payload = body.get("payload", {})
+    event_type = body.get("data", {}).get("event_type")
+    payload = body.get("data", {}).get("payload", {})
     call_control_id = payload.get("call_control_id")
 
     phone = payload.get("from")
