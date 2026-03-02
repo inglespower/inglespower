@@ -10,20 +10,19 @@ from ai import generar_respuesta, texto_a_voz
 
 app = FastAPI()
 
-# Creamos carpeta para guardar los audios de ElevenLabs temporalmente
+# Carpeta para audios temporales
 if not os.path.exists("static"):
     os.makedirs("static")
 
-# Montamos la carpeta para que sea accesible desde internet
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Configuración de Telnyx v4
+# Configuración Telnyx v4
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
 @app.get("/")
 async def health():
-    return {"status": "online", "service": "InglesPower AI con ElevenLabs"}
+    return {"status": "online", "service": "InglesPower AI Full"}
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -39,27 +38,34 @@ async def webhook(request: Request):
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                print(f"Iniciando llamada con {phone}. Saldo: {minutos}")
+                print(f"Llamada de {phone}. Saldo: {minutos}")
                 client.calls.actions.answer(call_id)
             else:
                 client.calls.actions.hangup(call_id)
 
-        # 2. LLAMADA CONTESTADA: Saludo inicial con ElevenLabs
+        # 2. LLAMADA CONTESTADA
         elif event_type == "call.answered":
             time.sleep(1.5)
-            hablar(call_id, "Welcome to your English practice. I am your AI tutor. How can I help you today?")
+            hablar(call_id, "Welcome to your English practice. I am Rachel, your tutor. How can I help you?")
 
-        # 3. CUANDO EL AUDIO TERMINA (Nativo o Playback)
+        # 3. ACTIVAR ESCUCHA (Corrección Error 422)
         elif event_type in ["call.speak.ended", "call.playback.ended"]:
             client.calls.actions.gather_using_ai(
                 call_id, 
                 parameters={
-                    "type": "chat_conversational",
-                    "language": "en-US"
+                    "language": "en-US",
+                    "type": "object",
+                    "properties": {
+                        "user_response": {
+                            "type": "string",
+                            "description": "Transcripción de la voz del usuario"
+                        }
+                    },
+                    "required": ["user_response"]
                 }
             )
 
-        # 4. PROCESAR RESPUESTA DEL USUARIO
+        # 4. PROCESAR LO QUE EL USUARIO DIJO
         elif event_type == "call.gather.ended":
             transcripcion = payload.get("transcription")
             if transcripcion:
@@ -68,7 +74,7 @@ async def webhook(request: Request):
                 hablar(call_id, respuesta_texto)
                 restar_minuto(phone)
             else:
-                hablar(call_id, "I'm sorry, I didn't catch that. Could you repeat?")
+                hablar(call_id, "I'm sorry, I didn't hear you. Please repeat.")
 
     except Exception as e:
         print(f"Error en Webhook: {e}")
@@ -76,22 +82,18 @@ async def webhook(request: Request):
     return Response(status_code=200)
 
 def hablar(call_id, texto):
-    """Genera audio con ElevenLabs y lo reproduce en la llamada."""
+    """Genera audio realista y lo reproduce."""
     try:
-        # Generar nombre único para el archivo de audio
         filename = f"audio_{int(time.time())}.mp3"
         filepath = os.path.join("static", filename)
         
-        # Llamar a ElevenLabs (desde ai.py)
         archivo_generado = texto_a_voz(texto, filepath)
         
         if archivo_generado:
             audio_url = f"{MI_URL_RENDER}/static/{filename}"
-            print(f"Reproduciendo audio: {audio_url}")
-            # Comando para reproducir audio externo en Telnyx
             client.calls.actions.playback_start(call_id, audio_url=audio_url)
         else:
-            # Fallback a voz de Telnyx si ElevenLabs falla
+            # Fallback si ElevenLabs falla
             client.calls.actions.speak(call_id, payload=texto, voice="female", language="en-US")
     except Exception as e:
-        print(f"Error al intentar hablar: {e}")
+        print(f"Error al hablar: {e}")
