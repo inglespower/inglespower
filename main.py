@@ -1,44 +1,58 @@
-import os
-from fastapi import FastAPI, Request, Response
 import telnyx
-from supabase_client import supabase
-from ai import obtener_respuesta_ai
+from fastapi import FastAPI, Request, Response
+from config import Config
+from supabase_client import obtener_minutos, restar_minuto
+from ai import generar_respuesta
+from telnyx_sms import enviar_sms
 
 app = FastAPI()
-telnyx.api_key = os.getenv("TELNYX_API_KEY")
+telnyx.api_key = Config.TELNYX_API_KEY
 
 @app.get("/")
-async def root():
-    return {"status": "online", "message": "Servidor de Voz AI Activo"}
+async def health():
+    return {"status": "online", "service": "InglesPower AI"}
 
 @app.post("/webhook")
-async def handle_call(request: Request):
+async def webhook(request: Request):
     data = await request.json()
     event = data.get("data", {})
     payload = event.get("payload", {})
-    call_control_id = payload.get("call_control_id")
-    
-    # 1. Identificar al cliente por su número de teléfono
-    from_number = payload.get("from")
-    
+    call_id = payload.get("call_control_id")
+    phone = payload.get("from")
+
+    # 1. Al entrar la llamada: Validar minutos
     if event.get("event_type") == "call.initiated":
-        # Verificar saldo en Supabase
-        user = supabase.table("users").select("minutes_balance").eq("phone", from_number).single().execute()
-        
-        if user.data and user.data["minutes_balance"] > 0:
-            telnyx.Call.answer(call_control_id=call_control_id)
-            enviar_texto_a_voz(call_control_id, "Hola, bienvenido. ¿En qué puedo ayudarte hoy?")
+        minutos = obtener_minutos(phone)
+        if minutos > 0:
+            telnyx.Call.answer(call_control_id=call_id)
         else:
-            telnyx.Call.answer(call_control_id=call_control_id)
-            enviar_texto_a_voz(call_control_id, "Lo siento, no tienes minutos suficientes. Por favor recarga en nuestra web.")
-            telnyx.Call.hangup(call_control_id=call_control_id)
+            enviar_sms(phone, "Saldo insuficiente. Compra minutos en nuestra web.")
+            telnyx.Call.hangup(call_control_id=call_id)
+
+    # 2. Cuando contesta: Saludo inicial
+    elif event.get("event_type") == "call.answered":
+        hablar(call_id, "Welcome to your English practice. How can I help you today?")
+
+    # 3. Después de que la IA habla: Escuchar al usuario
+    elif event.get("event_type") == "call.speak.ended":
+        telnyx.Call.gather_using_ai(call_control_id=call_id, parameters={"language": "en-US"})
+
+    # 4. Cuando el usuario termina de hablar: Procesar con IA
+    elif event.get("event_type") == "call.gather.ended":
+        transcripcion = payload.get("transcription")
+        if transcripcion:
+            respuesta = generar_respuesta(transcripcion)
+            hablar(call_id, respuesta)
+            restar_minuto(phone) # Descontamos 1 minuto por cada ciclo de habla
+        else:
+            hablar(call_id, "I didn't catch that. Can you repeat?")
 
     return Response(status_code=200)
 
-def enviar_texto_a_voz(call_id, texto):
+def hablar(call_id, texto):
     telnyx.Call.speak(
         call_control_id=call_id,
         payload=texto,
         voice="female",
-        language="es-ES"
+        language="en-US"
     )
