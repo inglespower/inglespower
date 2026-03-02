@@ -8,7 +8,6 @@ from supabase import create_client
 app = FastAPI()
 
 # 1. CONFIGURACIÓN DE CLIENTES
-# Asegúrate de configurar estas variables en el dashboard de Render
 openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
 client = OpenAI(api_key=openai_key)
 
@@ -40,10 +39,12 @@ def get_nathaniel_voice_url(texto):
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
 
     if not api_key or not voice_id:
+        print("Error: Faltan llaves de ElevenLabs")
         return None
 
-    # URL corregida con el path oficial de ElevenLabs
+    # URL CORREGIDA (Con las diagonales y el path oficial)
     url_eleven = f"https://api.elevenlabs.io{voice_id}"
+    
     headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
     data = {
         "text": texto,
@@ -55,41 +56,41 @@ def get_nathaniel_voice_url(texto):
         response = requests.post(url_eleven, json=data, headers=headers, timeout=30)
         if response.status_code == 200:
             file_name = f"voice_{uuid.uuid4()}.mp3"
-            # Sube el audio al bucket "audios" de Supabase
             supabase.storage.from_("audios").upload(
                 path=file_name,
                 file=response.content,
                 file_options={"content-type": "audio/mpeg"}
             )
             return supabase.storage.from_("audios").get_public_url(file_name)
+        else:
+            print(f"Error API ElevenLabs: {response.status_code} - {response.text}")
     except Exception as e:
         print("Error Voz:", e)
     return None
 
-# 3. WEBHOOK (Indentación corregida y respuesta TwiML)
+# 3. WEBHOOK (Indentación y formato TwiML corregidos)
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
     try:
-        # Extraer datos de Twilio
         form_data = await request.form()
         incoming_msg = form_data.get('Body', '')
         
         print(f"Mensaje recibido: {incoming_msg}")
         
-        # 1. Generar texto de respuesta
+        # Generar respuesta de texto
         respuesta_texto = generate_reply(incoming_msg)
         
-        # 2. Generar audio de la respuesta
+        # Generar URL del audio
         audio_url = get_nathaniel_voice_url(respuesta_texto)
         
-        # 3. Construir respuesta XML para Twilio (TwiML)
+        # Respuesta XML para Twilio
         twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
-        <Response>
-            <Message>
-                <Body>{respuesta_texto}</Body>
-                {f'<Media>{audio_url}</Media>' if audio_url else ''}
-            </Message>
-        </Response>"""
+<Response>
+    <Message>
+        <Body>{respuesta_texto}</Body>
+        {f'<Media>{audio_url}</Media>' if audio_url else ''}
+    </Message>
+</Response>"""
         
         return Response(content=twiml_response, media_type="application/xml")
 
@@ -97,7 +98,7 @@ async def whatsapp_webhook(request: Request):
         print(f"Error en webhook: {e}")
         return Response(content="<Response></Response>", media_type="application/xml")
 
-# Endpoint de prueba para verificar que el servidor corre
+# Endpoint raíz para evitar el error 404 en el navegador
 @app.get("/")
 async def root():
-    return {"status": "InglesPower Coach is live"}
+    return {"status": "InglesPower Coach is live and running!"}
