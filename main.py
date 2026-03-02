@@ -8,13 +8,15 @@ from supabase_client import obtener_minutos, restar_minuto
 
 app = FastAPI()
 
-# Cliente nuevo Telnyx 4.x
+# ✅ Cliente oficial Telnyx 4.x
 telnyx_client = Telnyx(api_key=Config.TELNYX_KEY)
+
 
 @app.get("/")
 @app.head("/")
 async def health():
     return {"status": "online"}
+
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
@@ -24,32 +26,50 @@ async def handle_webhook(request: Request):
             return Response(content="OK", status_code=200)
 
         data = await request.json()
+
         payload = data.get("data", {}).get("payload", {})
         event_type = data.get("data", {}).get("event_type")
         call_id = payload.get("call_control_id")
         from_number = payload.get("from")
 
-        if event_type == "call.initiated" and call_id:
+        if not call_id:
+            return Response(status_code=200)
+
+        # 🔥 Cuando la llamada inicia
+        if event_type == "call.initiated":
 
             balance = obtener_minutos(from_number)
 
             if balance > 0:
 
-                # ✅ Answer
-                telnyx_client.calls.answer(call_control_id=call_id)
+                # ✅ Contestar llamada
+                telnyx_client.calls.actions.answer(
+                    call_control_id=call_id
+                )
 
-                # ✅ Speak
-                telnyx_client.calls.speak(
+                # Pequeña pausa para asegurar que contestó
+                await asyncio.sleep(1)
+
+                # ✅ Hablar
+                telnyx_client.calls.actions.speak(
                     call_control_id=call_id,
                     payload="Hello! I am your AI English tutor. How can I help you today?",
                     voice="female",
                     language="en-US"
                 )
 
+                # Iniciar cronómetro de cobro
                 asyncio.create_task(cronometro_cobro(from_number, call_id))
 
             else:
-                telnyx_client.calls.speak(
+                # Sin minutos
+                telnyx_client.calls.actions.answer(
+                    call_control_id=call_id
+                )
+
+                await asyncio.sleep(1)
+
+                telnyx_client.calls.actions.speak(
                     call_control_id=call_id,
                     payload="No tienes minutos. Por favor recarga.",
                     language="es-ES"
@@ -57,7 +77,9 @@ async def handle_webhook(request: Request):
 
                 await asyncio.sleep(4)
 
-                telnyx_client.calls.hangup(call_control_id=call_id)
+                telnyx_client.calls.actions.hangup(
+                    call_control_id=call_id
+                )
 
     except Exception as e:
         print(f"Error procesando lógica de llamada: {e}")
@@ -68,10 +90,12 @@ async def handle_webhook(request: Request):
 async def cronometro_cobro(phone, call_id):
     while True:
         await asyncio.sleep(60)
+
         restar_minuto(phone)
 
         if obtener_minutos(phone) <= 0:
-            telnyx_client.calls.speak(
+
+            telnyx_client.calls.actions.speak(
                 call_control_id=call_id,
                 payload="Your time is up. Goodbye!",
                 language="en-US"
@@ -79,7 +103,10 @@ async def cronometro_cobro(phone, call_id):
 
             await asyncio.sleep(3)
 
-            telnyx_client.calls.hangup(call_control_id=call_id)
+            telnyx_client.calls.actions.hangup(
+                call_control_id=call_id
+            )
+
             break
 
 
