@@ -1,14 +1,16 @@
-# config.py
 import os
+from dotenv import load_dotenv
+
+# Carga variables desde el entorno de Render o archivo .env local
+load_dotenv()
 
 class Config:
-    """
-    Configuración de entorno para Supabase.
-    """
-    SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-    SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-
-# Opcional: debug para ver si las variables están cargadas
-if __name__ == "__main__":
-    print("DEBUG SUPABASE_URL:", Config.SUPABASE_URL)
-    print("DEBUG SUPABASE_KEY presente:", bool(Config.SUPABASE_KEY))
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+    TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
+    TELNYX_PUBLIC_KEY = os.getenv("TELNYX_PUBLIC_KEY")
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+    
+    # ID del perfil de mensajería de Telnyx (necesario para SMS)
+    TELNYX_MESSAGING_PROFILE_ID = os.getenv("TELNYX_MESSAGING_PROFILE_ID")
