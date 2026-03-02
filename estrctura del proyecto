@@ -1,10 +1,9 @@
 inglespower/
 │
 ├── main.py
-├── config.py
-├── supabase_client.py
-├── twilio_client.py
 ├── ai.py
+├── supabase_client.py
+├── config.py
 ├── requirements.txt
 ├── render.yaml
 └── README.md
