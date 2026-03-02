@@ -1,104 +1,87 @@
 import os
-import uuid
-import requests
-from fastapi import FastAPI, Request
-from supabase import create_client
-from openai import OpenAI
+from fastapi import FastAPI, Request, Response
+from twilio.twiml.voice_response import VoiceResponse, Gather
+from supabase_client import get_minutes, subtract_minute, add_minutes
+from twilio_client import send_sms
+from ai import generate_reply, get_nathaniel_voice_url
 
 app = FastAPI()
 
-# ----- Configuración OpenAI -----
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
-client = OpenAI(api_key=OPENAI_API_KEY)
+@app.post("/voice")
+async def voice(request: Request):
+form = await request.form()
+phone = form.get("From") or form.get("from")
+resp = VoiceResponse()
 
-# ----- Configuración Supabase -----
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+# 1. VERIFICACIÓN DE MINUTOS
+minutes = get_minutes(phone)
+if minutes <= 0:
+resp.say("You have no minutes. Please recharge your account at our website. Thank you.", voice="alice")
+return Response(content=str(resp), media_type="application/xml")
 
-# ----- Configuración ElevenLabs -----
-ELEVEN_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
-ELEVEN_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID")
+# 2. SALUDO INICIAL (MEJORADO)
+# Agregamos speechTimeout="3" y profanityFilter="false" para mejor captura
+gather = Gather(
+input="speech",
+action="/process",
+method="POST",
+speechTimeout="3", # Espera 3 segundos de silencio antes de procesar
+language="en-US",
+enhanced=True, # Mayor calidad de reconocimiento
+speechModel="phone_call" # Optimizado para llamadas telefónicas
+)
+gather.say("Hello! I am your English Power coach. How can I help you practice today?", voice="alice")
+resp.append(gather)
 
-# ----- Configuración Telnyx -----
-TELNYX_API_KEY = os.environ.get("TELNYX_API_KEY")
-TELNYX_PHONE_NUMBER = os.environ.get("TELNYX_PHONE_NUMBER")
+return Response(content=str(resp), media_type="application/xml")
 
-# ---------------- Funciones ----------------
+@app.post("/process")
+async def process(request: Request):
+form = await request.form()
+phone = form.get("From") or form.get("from")
+speech = form.get("SpeechResult", "") # Aquí llega lo que dijiste
+resp = VoiceResponse()
 
-def generate_reply(text: str) -> str:
-    """Genera respuesta de la AI usando GPT"""
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are English Power, a friendly English coach. Correct mistakes and encourage the student. Be brief."},
-            {"role": "user", "content": text}
-        ],
-        max_tokens=120
-    )
-    return response.choices[0].message.content
+# Si Twilio no entendió nada, volvemos a preguntar en lugar de fallar
+if not speech:
+gather = Gather(input="speech", action="/process", method="POST", speechTimeout="3", language="en-US")
+gather.say("I'm sorry, I didn't catch that. Could you repeat it?", voice="alice")
+resp.append(gather)
+return Response(content=str(resp), media_type="application/xml")
 
-def get_voice_audio_url(text: str) -> str:
-    """Convierte texto a voz con ElevenLabs y sube a Supabase"""
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
-    headers = {"xi-api-key": ELEVEN_API_KEY, "Content-Type": "application/json"}
-    data = {"text": text, "model_id": "eleven_multilingual_v2"}
+# 3. VALIDAR MINUTOS
+if get_minutes(phone) <= 0:
+resp.say("Your time is finished. Goodbye.", voice="alice")
+return Response(content=str(resp), media_type="application/xml")
 
-    resp = requests.post(url, json=data, headers=headers)
-    if resp.status_code != 200:
-        print("ElevenLabs error:", resp.text)
-        return None
+# 4. RESTAMOS EL MINUTO
+subtract_minute(phone)
 
-    file_name = f"reply_{uuid.uuid4()}.mp3"
-    supabase.storage.from_("audios").upload(
-        path=file_name,
-        file=resp.content,
-        file_options={"content-type": "audio/mpeg"}
-    )
-    public_url = supabase.storage.from_("audios").get_public_url(file_name)
-    return public_url
+# 5. GENERAR RESPUESTA Y AUDIO
+reply_text = generate_reply(speech)
+audio_url = get_nathaniel_voice_url(reply_text)
 
-async def transcribe_audio(file_url: str) -> str:
-    """Transcribe audio usando Whisper/OpenAI"""
-    audio_resp = requests.get(file_url)
-    audio_bytes = audio_resp.content
+# 6. AVISO DE ÚLTIMO MINUTO
+if get_minutes(phone) == 1:
+resp.say("Note: You have one minute remaining.", voice="alice")
 
-    transcript = client.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_bytes
-    )
-    return transcript.text
+# 7. CONTINUAR CONVERSACIÓN (MEJORADO)
+gather = Gather(
+input="speech",
+action="/process",
+method="POST",
+speechTimeout="3",
+language="en-US",
+enhanced=True,
+speechModel="phone_call"
+)
 
-# ---------------- Rutas ----------------
+if audio_url:
+gather.play(audio_url)
+else:
+# Respaldo si falla ElevenLabs
+gather.say(reply_text, voice="alice")
 
-@app.post("/webhook")
-async def webhook(request: Request):
-    """
-    Webhook de Telnyx: recibe llamada entrante
-    """
-    try:
-        # Telnyx envía x-www-form-urlencoded, no JSON
-        form = await request.form()
-        data = dict(form)
-        
-        audio_url = data.get("RecordingUrl")  # Telnyx manda URL de grabación
-        if not audio_url:
-            print("Webhook vacío o malformado:", data)
-            return {"error": "No audio found in webhook"}
+resp.append(gather)
 
-        # Transcribe el audio
-        user_text = await transcribe_audio(audio_url)
-        # Genera la respuesta de la AI
-        ai_text = generate_reply(user_text)
-        # Convierte la respuesta a audio y sube
-        ai_audio_url = get_voice_audio_url(ai_text)
-
-        return {"reply_text": ai_text, "reply_audio": ai_audio_url}
-
-    except Exception as e:
-        print("Error en webhook:", e)
-        return {"error": str(e)}
-
-@app.get("/")
-async def root():
-    return {"status": "English Power AI running ✅"}
+return Response(content=str(resp), media_type="application/xml")
