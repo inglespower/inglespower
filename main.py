@@ -8,7 +8,6 @@ from supabase_client import obtener_minutos, restar_minuto
 
 app = FastAPI()
 
-# Cliente Telnyx 4.x
 telnyx_client = Telnyx(api_key=Config.TELNYX_KEY)
 
 
@@ -31,7 +30,14 @@ async def handle_webhook(request: Request):
         if not call_id:
             return Response(status_code=200)
 
-        # 🔥 SOLO actuamos cuando la llamada ya fue contestada
+        # 🔥 PASO 1: Cuando inicia, contestamos
+        if event_type == "call.initiated":
+
+            telnyx_client.calls.actions.answer(
+                call_control_id=call_id
+            )
+
+        # 🔥 PASO 2: Cuando ya está contestada, hablamos
         if event_type == "call.answered":
 
             balance = obtener_minutos(from_number)
@@ -62,7 +68,6 @@ async def handle_webhook(request: Request):
                     call_control_id=call_id
                 )
 
-        # Si la llamada terminó, no hacemos nada
         if event_type == "call.hangup":
             print(f"Llamada terminada: {call_id}")
 
