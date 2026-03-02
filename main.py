@@ -10,13 +10,20 @@ from ai import generar_respuesta, texto_a_voz
 
 app = FastAPI()
 
-# Para que Telnyx pueda acceder a los archivos de audio que generamos
+# Creamos carpeta para guardar los audios de ElevenLabs temporalmente
 if not os.path.exists("static"):
     os.makedirs("static")
+
+# Montamos la carpeta para que sea accesible desde internet
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Configuración de Telnyx v4
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
-MI_URL_PUBLICA = "https://tu-app-en-render.onrender.com" # CAMBIA ESTO POR TU URL DE RENDER
+MI_URL_RENDER = "https://inglespower.onrender.com"
+
+@app.get("/")
+async def health():
+    return {"status": "online", "service": "InglesPower AI con ElevenLabs"}
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -28,49 +35,63 @@ async def webhook(request: Request):
         phone = payload.get("from")
         event_type = event.get("event_type")
 
+        # 1. LLAMADA INICIADA
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
+                print(f"Iniciando llamada con {phone}. Saldo: {minutos}")
                 client.calls.actions.answer(call_id)
             else:
                 client.calls.actions.hangup(call_id)
 
+        # 2. LLAMADA CONTESTADA: Saludo inicial con ElevenLabs
         elif event_type == "call.answered":
-            time.sleep(1.5) 
-            hablar(call_id, "Welcome to your English practice. How can I help you?")
+            time.sleep(1.5)
+            hablar(call_id, "Welcome to your English practice. I am your AI tutor. How can I help you today?")
 
-        elif event_type == "call.speak.ended" or event_type == "call.playback.ended":
+        # 3. CUANDO EL AUDIO TERMINA (Nativo o Playback)
+        elif event_type in ["call.speak.ended", "call.playback.ended"]:
             client.calls.actions.gather_using_ai(
                 call_id, 
-                parameters={"language": "en-US", "type": "chat_conversational"}
+                parameters={
+                    "type": "chat_conversational",
+                    "language": "en-US"
+                }
             )
 
+        # 4. PROCESAR RESPUESTA DEL USUARIO
         elif event_type == "call.gather.ended":
             transcripcion = payload.get("transcription")
             if transcripcion:
+                print(f"Usuario: {transcripcion}")
                 respuesta_texto = generar_respuesta(transcripcion)
                 hablar(call_id, respuesta_texto)
                 restar_minuto(phone)
             else:
-                hablar(call_id, "I didn't hear you. Please repeat.")
+                hablar(call_id, "I'm sorry, I didn't catch that. Could you repeat?")
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error en Webhook: {e}")
+
     return Response(status_code=200)
 
 def hablar(call_id, texto):
-    """Genera audio con ElevenLabs y le pide a Telnyx que lo reproduzca."""
+    """Genera audio con ElevenLabs y lo reproduce en la llamada."""
     try:
-        # 1. Crear el audio
-        filename = f"static/audio_{int(time.time())}.mp3"
-        archivo_generado = texto_a_voz(texto, filename)
+        # Generar nombre único para el archivo de audio
+        filename = f"audio_{int(time.time())}.mp3"
+        filepath = os.path.join("static", filename)
+        
+        # Llamar a ElevenLabs (desde ai.py)
+        archivo_generado = texto_a_voz(texto, filepath)
         
         if archivo_generado:
-            # 2. Pedirle a Telnyx que reproduzca la URL del audio
-            audio_url = f"{MI_URL_PUBLICA}/{archivo_generado}"
+            audio_url = f"{MI_URL_RENDER}/static/{filename}"
+            print(f"Reproduciendo audio: {audio_url}")
+            # Comando para reproducir audio externo en Telnyx
             client.calls.actions.playback_start(call_id, audio_url=audio_url)
         else:
-            # Fallback a voz robótica si ElevenLabs falla
+            # Fallback a voz de Telnyx si ElevenLabs falla
             client.calls.actions.speak(call_id, payload=texto, voice="female", language="en-US")
     except Exception as e:
-        print(f"Error al hablar: {e}")
+        print(f"Error al intentar hablar: {e}")
