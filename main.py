@@ -8,6 +8,7 @@ from supabase_client import obtener_minutos, restar_minuto
 
 app = FastAPI()
 
+# Cliente Telnyx 4.x
 telnyx_client = Telnyx(api_key=Config.TELNYX_KEY)
 
 
@@ -20,10 +21,6 @@ async def health():
 @app.post("/webhook")
 async def handle_webhook(request: Request):
     try:
-        body = await request.body()
-        if not body:
-            return Response(content="OK", status_code=200)
-
         data = await request.json()
 
         payload = data.get("data", {}).get("payload", {})
@@ -34,16 +31,10 @@ async def handle_webhook(request: Request):
         if not call_id:
             return Response(status_code=200)
 
-        if event_type == "call.initiated":
+        # 🔥 SOLO actuamos cuando la llamada ya fue contestada
+        if event_type == "call.answered":
 
             balance = obtener_minutos(from_number)
-
-            # Siempre contestamos primero
-            telnyx_client.calls.actions.answer(
-                call_control_id=call_id
-            )
-
-            await asyncio.sleep(1)
 
             if balance > 0:
 
@@ -71,6 +62,10 @@ async def handle_webhook(request: Request):
                     call_control_id=call_id
                 )
 
+        # Si la llamada terminó, no hacemos nada
+        if event_type == "call.hangup":
+            print(f"Llamada terminada: {call_id}")
+
     except Exception as e:
         print(f"Error procesando lógica de llamada: {e}")
 
@@ -85,18 +80,21 @@ async def cronometro_cobro(phone, call_id):
 
         if obtener_minutos(phone) <= 0:
 
-            telnyx_client.calls.actions.speak(
-                call_control_id=call_id,
-                payload="Your time is up. Goodbye!",
-                voice="female",
-                language="en-US"
-            )
+            try:
+                telnyx_client.calls.actions.speak(
+                    call_control_id=call_id,
+                    payload="Your time is up. Goodbye!",
+                    voice="female",
+                    language="en-US"
+                )
 
-            await asyncio.sleep(3)
+                await asyncio.sleep(3)
 
-            telnyx_client.calls.actions.hangup(
-                call_control_id=call_id
-            )
+                telnyx_client.calls.actions.hangup(
+                    call_control_id=call_id
+                )
+            except:
+                pass
 
             break
 
