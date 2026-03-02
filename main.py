@@ -1,12 +1,15 @@
 import telnyx
+from telnyx import Telnyx  # Importamos el cliente moderno
 from fastapi import FastAPI, Request, Response
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
-from telnyx_sms import enviar_sms
+# from telnyx_sms import enviar_sms # Asegúrate de corregir este archivo también
 
 app = FastAPI()
-telnyx.api_key = Config.TELNYX_API_KEY
+
+# INICIALIZACIÓN MODERNA (V4)
+client = Telnyx(api_key=Config.TELNYX_API_KEY)
 
 @app.get("/")
 async def health():
@@ -24,10 +27,11 @@ async def webhook(request: Request):
     if event.get("event_type") == "call.initiated":
         minutos = obtener_minutos(phone)
         if minutos > 0:
-            telnyx.Call.answer(call_control_id=call_id)
+            # CORRECCIÓN: client.calls en lugar de telnyx.Call
+            client.calls.answer(call_control_id=call_id)
         else:
-            enviar_sms(phone, "Saldo insuficiente. Compra minutos en nuestra web.")
-            telnyx.Call.hangup(call_control_id=call_id)
+            # enviar_sms(phone, "Saldo insuficiente. Compra minutos en nuestra web.")
+            client.calls.hangup(call_control_id=call_id)
 
     # 2. Cuando contesta: Saludo inicial
     elif event.get("event_type") == "call.answered":
@@ -35,7 +39,8 @@ async def webhook(request: Request):
 
     # 3. Después de que la IA habla: Escuchar al usuario
     elif event.get("event_type") == "call.speak.ended":
-        telnyx.Call.gather_using_ai(call_control_id=call_id, parameters={"language": "en-US"})
+        # CORRECCIÓN: client.calls
+        client.calls.gather_using_ai(call_control_id=call_id, parameters={"language": "en-US"})
 
     # 4. Cuando el usuario termina de hablar: Procesar con IA
     elif event.get("event_type") == "call.gather.ended":
@@ -43,14 +48,15 @@ async def webhook(request: Request):
         if transcripcion:
             respuesta = generar_respuesta(transcripcion)
             hablar(call_id, respuesta)
-            restar_minuto(phone) # Descontamos 1 minuto por cada ciclo de habla
+            restar_minuto(phone) 
         else:
             hablar(call_id, "I didn't catch that. Can you repeat?")
 
     return Response(status_code=200)
 
 def hablar(call_id, texto):
-    telnyx.Call.speak(
+    # CORRECCIÓN: client.calls
+    client.calls.speak(
         call_control_id=call_id,
         payload=texto,
         voice="female",
