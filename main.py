@@ -1,109 +1,38 @@
-import os
-import uvicorn
-import asyncio
-from fastapi import FastAPI, Request, Response
-from telnyx import Telnyx
-from config import Config
-from supabase_client import obtener_minutos, restar_minuto
+# main.py
+from supabase_client import obtener_minutos, restar_minuto_y_obtener_balance, conectar_db
 
-app = FastAPI()
+# Configuración inicial de minutos para usuarios nuevos
+MINUTOS_INICIALES = 10
 
-telnyx_client = Telnyx(api_key=Config.TELNYX_KEY)
+# Número de teléfono del usuario (en producción lo obtienes de la llamada)
+phone = "+15555555555"
 
+# Obtenemos los minutos del usuario
+minutos = obtener_minutos(phone)
 
-@app.get("/")
-@app.head("/")
-async def health():
-    return {"status": "online"}
-
-
-@app.post("/webhook")
-async def handle_webhook(request: Request):
-    try:
-        data = await request.json()
-
-        payload = data.get("data", {}).get("payload", {})
-        event_type = data.get("data", {}).get("event_type")
-        call_id = payload.get("call_control_id")
-        from_number = payload.get("from")
-
-        if not call_id:
-            return Response(status_code=200)
-
-        # 🔥 PASO 1: Cuando inicia, contestamos
-        if event_type == "call.initiated":
-
-            telnyx_client.calls.actions.answer(
-                call_control_id=call_id
-            )
-
-        # 🔥 PASO 2: Cuando ya está contestada, hablamos
-        if event_type == "call.answered":
-
-            balance = obtener_minutos(from_number)
-
-            if balance > 0:
-
-                telnyx_client.calls.actions.speak(
-                    call_control_id=call_id,
-                    payload="Hello! I am your AI English tutor. How can I help you today?",
-                    voice="female",
-                    language="en-US"
-                )
-
-                asyncio.create_task(cronometro_cobro(from_number, call_id))
-
+# Si no tiene minutos o no existe, creamos el usuario con saldo inicial
+if minutos == 0:
+    db = conectar_db()
+    if db:
+        try:
+            # Verifica si el usuario ya existe
+            existing = db.table("users").select("*").eq("phone", phone).maybe_single().execute()
+            if not existing.data:
+                db.table("users").insert({
+                    "phone": phone,
+                    "balance_minutes": MINUTOS_INICIALES
+                }).execute()
+                minutos = MINUTOS_INICIALES
+                print(f"Usuario creado con {MINUTOS_INICIALES} minutos.")
             else:
+                print("Usuario existe pero sin minutos. Por favor recarga.")
+        except Exception as e:
+            print("❌ Error creando usuario:", e)
 
-                telnyx_client.calls.actions.speak(
-                    call_control_id=call_id,
-                    payload="No tienes minutos. Por favor recarga.",
-                    voice="female",
-                    language="es-ES"
-                )
-
-                await asyncio.sleep(4)
-
-                telnyx_client.calls.actions.hangup(
-                    call_control_id=call_id
-                )
-
-        if event_type == "call.hangup":
-            print(f"Llamada terminada: {call_id}")
-
-    except Exception as e:
-        print(f"Error procesando lógica de llamada: {e}")
-
-    return Response(status_code=200)
-
-
-async def cronometro_cobro(phone, call_id):
-    while True:
-        await asyncio.sleep(60)
-
-        restar_minuto(phone)
-
-        if obtener_minutos(phone) <= 0:
-
-            try:
-                telnyx_client.calls.actions.speak(
-                    call_control_id=call_id,
-                    payload="Your time is up. Goodbye!",
-                    voice="female",
-                    language="en-US"
-                )
-
-                await asyncio.sleep(3)
-
-                telnyx_client.calls.actions.hangup(
-                    call_control_id=call_id
-                )
-            except:
-                pass
-
-            break
-
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+# Verificamos nuevamente el balance
+if minutos > 0:
+    print("Hello! I am your AI English tutor...")
+    nuevo_balance = restar_minuto_y_obtener_balance(phone)
+    print(f"Minuto restado ✅ Nuevo balance: {nuevo_balance}")
+else:
+    print("No tienes minutos… por favor recarga.")
