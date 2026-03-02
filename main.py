@@ -65,7 +65,7 @@ async def webhook(request: Request):
     if isinstance(phone, dict):
         phone = phone.get("phone_number")
 
-    print("EVENT:", event_type)
+    print("EVENT:", event_type, "CALL ID:", call_control_id)
 
     # =========================
     # 1️⃣ Contestamos la llamada
@@ -103,7 +103,7 @@ async def webhook(request: Request):
             format="mp3",
             channels="single",
             play_beep=True,
-            max_length=20
+            max_length=30  # puedes ajustar la duración
         )
 
     # =========================
