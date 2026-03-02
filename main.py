@@ -8,7 +8,6 @@ from supabase_client import obtener_minutos, restar_minuto
 
 app = FastAPI()
 
-# ✅ Cliente oficial Telnyx 4.x
 telnyx_client = Telnyx(api_key=Config.TELNYX_KEY)
 
 
@@ -35,22 +34,19 @@ async def handle_webhook(request: Request):
         if not call_id:
             return Response(status_code=200)
 
-        # 🔥 Cuando la llamada inicia
         if event_type == "call.initiated":
 
             balance = obtener_minutos(from_number)
 
+            # Siempre contestamos primero
+            telnyx_client.calls.actions.answer(
+                call_control_id=call_id
+            )
+
+            await asyncio.sleep(1)
+
             if balance > 0:
 
-                # ✅ Contestar llamada
-                telnyx_client.calls.actions.answer(
-                    call_control_id=call_id
-                )
-
-                # Pequeña pausa para asegurar que contestó
-                await asyncio.sleep(1)
-
-                # ✅ Hablar
                 telnyx_client.calls.actions.speak(
                     call_control_id=call_id,
                     payload="Hello! I am your AI English tutor. How can I help you today?",
@@ -58,20 +54,14 @@ async def handle_webhook(request: Request):
                     language="en-US"
                 )
 
-                # Iniciar cronómetro de cobro
                 asyncio.create_task(cronometro_cobro(from_number, call_id))
 
             else:
-                # Sin minutos
-                telnyx_client.calls.actions.answer(
-                    call_control_id=call_id
-                )
-
-                await asyncio.sleep(1)
 
                 telnyx_client.calls.actions.speak(
                     call_control_id=call_id,
                     payload="No tienes minutos. Por favor recarga.",
+                    voice="female",
                     language="es-ES"
                 )
 
@@ -98,6 +88,7 @@ async def cronometro_cobro(phone, call_id):
             telnyx_client.calls.actions.speak(
                 call_control_id=call_id,
                 payload="Your time is up. Goodbye!",
+                voice="female",
                 language="en-US"
             )
 
