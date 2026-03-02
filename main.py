@@ -1,13 +1,13 @@
 import os
 import uuid
 import requests
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from openai import OpenAI
 from supabase import create_client
 
 app = FastAPI()
 
-# 1. CONFIGURACIÓN DE CLIENTES (Asegúrate de que estas variables estén en Render)
+# 1. CONFIGURACIÓN DE CLIENTES
 openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
 client = OpenAI(api_key=openai_key)
 
@@ -17,7 +17,7 @@ supabase = create_client(supabase_url, supabase_key)
 
 # 2. FUNCIONES DE LÓGICA
 def generate_reply(user_text):
-    """Genera respuesta con OpenAI"""
+    """Genera respuesta de texto con OpenAI"""
     system_prompt = "You are InglesPower, a bilingual English coach. Be brief."
     try:
         resp = client.chat.completions.create(
@@ -39,24 +39,23 @@ def get_nathaniel_voice_url(texto):
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "").strip()
 
     if not api_key or not voice_id:
-        print("Error: Faltan llaves de ElevenLabs en variables de entorno")
+        print("Faltan credenciales de ElevenLabs")
         return None
 
-    # CORRECCIÓN DE LA URL: Se agregó '/v1/text-to-speech/' para evitar el error de resolución de nombre
+    # URL CORREGIDA: Se agregaron las barras '/' y el path '/v1/text-to-speech/'
     url_eleven = f"https://api.elevenlabs.io{voice_id}"
     
     headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
-    data = {
+    body = {
         "text": texto,
         "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}
     }
 
     try:
-        response = requests.post(url_eleven, json=data, headers=headers, timeout=30)
+        response = requests.post(url_eleven, json=body, headers=headers, timeout=30)
         if response.status_code == 200:
             file_name = f"voice_{uuid.uuid4()}.mp3"
-            # Sube el audio al bucket "audios"
             supabase.storage.from_("audios").upload(
                 path=file_name,
                 file=response.content,
@@ -64,44 +63,34 @@ def get_nathaniel_voice_url(texto):
             )
             return supabase.storage.from_("audios").get_public_url(file_name)
         else:
-            print(f"Error ElevenLabs ({response.status_code}): {response.text}")
+            print(f"Error ElevenLabs: {response.status_code} - {response.text}")
     except Exception as e:
         print("Error Voz:", e)
     return None
 
-# 3. WEBHOOK (Indentación corregida y respuesta compatible con WhatsApp)
+# 3. ENDPOINT PRINCIPAL (Recibe JSON)
 @app.post("/webhook")
-async def whatsapp_webhook(request: Request):
+async def process_message(request: Request):
     try:
-        # Extraer mensaje de WhatsApp (Twilio envía un formulario)
-        form_data = await request.form()
-        incoming_msg = form_data.get('Body', '')
+        # Lee el JSON que envíe tu app (ej: {"text": "Hello"})
+        data = await request.json()
+        user_msg = data.get('text', '')
         
-        print(f"Mensaje recibido: {incoming_msg}")
+        print(f"Mensaje recibido: {user_msg}")
         
-        # 1. Generar respuesta de texto con IA
-        respuesta_texto = generate_reply(incoming_msg)
+        # Lógica de respuesta
+        respuesta_ia = generate_reply(user_msg)
+        audio_url = get_nathaniel_voice_url(respuesta_ia)
         
-        # 2. Generar audio de la respuesta
-        audio_url = get_nathaniel_voice_url(respuesta_texto)
-        
-        # 3. Formato TwiML (XML) para que Twilio envíe el mensaje y el audio
-        twiml_response = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-    <Message>
-        <Body>{respuesta_texto}</Body>
-        {f'<Media>{audio_url}</Media>' if audio_url else ''}
-    </Message>
-</Response>"""
-        
-        return Response(content=twiml_response, media_type="application/xml")
-
+        return {
+            "status": "success",
+            "reply": respuesta_ia,
+            "audio": audio_url
+        }
     except Exception as e:
-        print(f"Error en webhook: {e}")
-        # Respuesta vacía en caso de error para no romper el flujo
-        return Response(content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>', media_type="application/xml")
+        print(f"Error: {e}")
+        return {"status": "error", "detail": str(e)}
 
-# Endpoint raíz para verificar que el servidor está encendido
 @app.get("/")
 async def root():
-    return {"status": "InglesPower Coach is live and running!"}
+    return {"status": "InglesPower Coach is online"}
