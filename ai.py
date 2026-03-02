@@ -1,14 +1,14 @@
-import os
 from openai import OpenAI
+from config import Config
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
-def obtener_respuesta_ai(prompt_usuario):
+def generar_respuesta(texto_usuario):
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": "Eres un tutor de idiomas servicial. Habla de forma natural y breve."},
-            {"role": "user", "content": prompt_usuario}
+            {"role": "system", "content": "Eres un tutor de inglés nativo. Sé amable, breve y corrige los errores del usuario de forma sutil."},
+            {"role": "user", "content": texto_usuario}
         ]
     )
-    return response.choices[0].message.content
+    return response.choices.message.content
