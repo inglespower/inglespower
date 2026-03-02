@@ -1,55 +1,51 @@
 import base64
-import json
 import httpx
 import openai
 from config import Config
 
+# Configuración de OpenAI
 openai.api_key = Config.OPENAI_API_KEY
 
 SYSTEM_PROMPT = (
-    "Eres un tutor de inglés nativo y paciente. Tu objetivo es ayudar al usuario a practicar. "
-    "Mantén tus respuestas cortas (máximo 2 oraciones) para que la conversación sea fluida por teléfono. "
-    "Si el usuario comete un error, corrígelo suavemente."
+    "Eres un tutor de inglés nativo y paciente. Tu misión es ayudar al usuario a practicar. "
+    "Responde de forma breve (máximo 2 frases) para que la conversación sea fluida por teléfono. "
+    "Si el usuario comete un error, corrígelo suavemente en inglés."
 )
 
-async def procesar_voz_a_voz(audio_base64_incoming):
-    """
-    Recibe audio de Telnyx, le pregunta a OpenAI y devuelve audio de ElevenLabs.
-    """
-    # 1. Convertir audio entrante a texto (Whisper)
-    # (En una implementación de baja latencia, esto se hace via Streaming WebSocket)
-    # Aquí simulamos el flujo de respuesta de texto a voz:
-    
-    texto_usuario = "Hello, I want to practice my English." # Simulación de entrada
-    
-    # 2. Generar respuesta de texto con GPT-4o
-    response = await openai.ChatCompletion.acreate(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": texto_usuario}
-        ]
-    )
-    respuesta_texto = response.choices[0].message.content
+async def generar_respuesta_ia(texto_usuario):
+    """Pregunta a GPT-4o y obtiene respuesta de texto"""
+    try:
+        response = await openai.ChatCompletion.acreate(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": texto_usuario}
+            ],
+            max_tokens=100
+        )
+        return response.choices.message.content
+    except Exception as e:
+        print(f"Error OpenAI: {e}")
+        return "I'm sorry, could you repeat that?"
 
-    # 3. Convertir esa respuesta a voz humana con ElevenLabs
+async def voz_eleven_labs(texto):
+    """Convierte el texto en audio de alta calidad (Voz humana)"""
+    url = f"https://api.elevenlabs.io{Config.ELEVENLABS_VOICE_ID}"
     headers = {
         "xi-api-key": Config.ELEVENLABS_API_KEY,
         "Content-Type": "application/json"
     }
-    
-    payload = {
-        "text": respuesta_texto,
+    data = {
+        "text": texto,
         "model_id": "eleven_multilingual_v2",
-        "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}
+        "voice_settings": {
+            "stability": 0.5, 
+            "similarity_boost": 0.8
+        }
     }
-
-    url = f"https://api.elevenlabs.io{Config.ELEVENLABS_VOICE_ID}"
-    
     async with httpx.AsyncClient() as client:
-        res = await client.post(url, json=payload, headers=headers)
+        res = await client.post(url, json=data, headers=headers)
         if res.status_code == 200:
-            # Convertimos el audio binario a Base64 para que Telnyx lo pueda reproducir
-            audio_base64 = base64.b64encode(res.content).decode('utf-8')
-            return audio_base64
+            # Retorna el audio codificado en Base64 para que Telnyx lo reproduzca
+            return base64.b64encode(res.content).decode('utf-8')
     return None
