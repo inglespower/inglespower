@@ -7,3 +7,4 @@ requests
 httpx
 python-dotenv
 python-multipart
+websockets
