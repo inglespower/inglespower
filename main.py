@@ -27,6 +27,7 @@ MI_URL_RENDER = "https://inglespower.onrender.com"
 asistente_activo = {}
 MAX_MP3_FILES = 20  # Máximo de archivos MP3 guardados
 
+
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
@@ -41,45 +42,43 @@ async def webhook(request: Request):
 
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
-            print(f"[MINUTOS DISPONIBLES] {minutos} para {phone}")
             if minutos > 0:
                 client.calls.actions.answer(call_control_id=call_id)
-                asistente_activo[call_id] = False
+                asistente_activo[call_id] = True
             else:
                 client.calls.actions.hangup(call_control_id=call_id)
-                print(f"[HANGUP] Usuario sin minutos: {phone}")
 
         elif event_type == "call.answered":
             time.sleep(1)
             hablar(call_id, "Hola, soy Thorthugo, tu tutor de inglés. ¿Qué quieres practicar hoy?")
 
         elif event_type in ["call.speak.ended", "call.audio_playback.ended"]:
-            if not asistente_activo.get(call_id, False):
-                asistente_activo[call_id] = True
-                client.calls.actions.gather_using_ai(
-                    call_control_id=call_id,
-                    parameters={
-                        "language": "es-MX",
-                        "type": "object",
-                        "properties": {
-                            "user_input": {"type": "string", "description": "Respuesta del usuario"}
-                        },
-                        "required": ["user_input"]
-                    }
-                )
-                print(f"[GATHER_AI] Iniciado para Call ID: {call_id}")
+            if asistente_activo.get(call_id, False):
+                try:
+                    client.calls.actions.gather_using_ai(
+                        call_control_id=call_id,
+                        parameters={
+                            "language": "es-MX",
+                            "type": "object",
+                            "properties": {
+                                "user_input": {"type": "string", "description": "Respuesta del usuario"}
+                            },
+                            "required": ["user_input"]
+                        }
+                    )
+                except Exception as e:
+                    if "90018" in str(e):
+                        print(f"[CALL YA TERMINADA] Call ID: {call_id}")
+                    else:
+                        print(f"[ERROR GATHER] {e}")
 
         elif event_type == "call.gather.ended":
-            asistente_activo[call_id] = False
             transcripcion = payload.get("transcription")
             if transcripcion:
-                print(f"[TRANSCRIPCIÓN] {transcripcion}")
                 respuesta = generar_respuesta(transcripcion)
-                hablar(call_id, respuesta)
                 restar_minuto(phone)
-                print(f"[MINUTOS RESTADOS] Nuevo total para {phone}: {obtener_minutos(phone)}")
+                hablar(call_id, respuesta)
             else:
-                print(f"[TRANSCRIPCIÓN VACÍA] Repetir para {phone}")
                 hablar(call_id, "No te escuché bien. Por favor, repite.")
 
         elif event_type == "call.hangup":
@@ -93,33 +92,42 @@ async def webhook(request: Request):
 
 
 def hablar(call_id, texto):
+    if not asistente_activo.get(call_id, False):
+        print(f"[INFO] Call ID {call_id} no está activa, no se reproduce audio")
+        return
+
     try:
-        # 1️⃣ Generar audio ElevenLabs (v2.x) usando .generate()
+        # Generar audio ElevenLabs
         audio_bytes = client_elevenlabs.generate(
             text=texto,
             voice="alloy"
         )
 
-        # 2️⃣ Guardar MP3 en static
+        # Guardar MP3 en static
         timestamp = int(time.time())
         filename = f"audio_{timestamp}.mp3"
         filepath = os.path.join("static", filename)
         with open(filepath, "wb") as f:
             f.write(audio_bytes)
-        print(f"[AUDIO GENERADO] {filename}")
 
-        # 3️⃣ Limpiar archivos antiguos
+        # Limpiar archivos antiguos
         limpiar_archivos_mp3()
 
-        # 4️⃣ URL público
+        # URL público
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-        # 5️⃣ Reproducir en la llamada
-        client.calls.actions.audio_playback_start(
-            call_control_id=call_id,
-            audio_url=audio_url
-        )
-        print(f"[PLAYBACK START] Call ID: {call_id} | URL: {audio_url}")
+        # Reproducir en la llamada
+        try:
+            client.calls.actions.audio_playback_start(
+                call_control_id=call_id,
+                audio_url=audio_url
+            )
+            print(f"[PLAYBACK START] Call ID: {call_id} | URL: {audio_url}")
+        except Exception as e:
+            if "90018" in str(e):
+                print(f"[CALL YA TERMINADA] No se puede reproducir audio para {call_id}")
+            else:
+                print(f"[ERROR Playback] {e}")
 
     except Exception as e:
         print(f"[ERROR Hablar] {e}")
