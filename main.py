@@ -11,14 +11,15 @@ from elevenlabs.client import ElevenLabs
 
 app = FastAPI()
 
-# 1. ElevenLabs v2.x
+# 1. Cliente ElevenLabs (Voz Real)
 el_client = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 VOICE_ID = "WOY6pnQ1WCg0mrOZ54lM"
 
-# 2. Telnyx v4.0.0 - Cliente instanciado
+# 2. Cliente Telnyx v4.0.0 (Sintaxis Actualizada)
 telnyx_client = telnyx.Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
+# Carpeta static
 if not os.path.exists("static"):
     os.makedirs("static")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -43,7 +44,7 @@ async def webhook(request: Request):
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                # CORRECCIÓN V4: Acceso vía calls.call_control.answer
+                # SINTAXIS V4: Acceso vía calls.call_control.answer
                 telnyx_client.calls.call_control.answer(call_id)
                 asistente_activo[call_id] = True
             else:
@@ -55,7 +56,7 @@ async def webhook(request: Request):
 
         elif event_type in ["call.speak.ended", "call.audio_playback.ended"]:
             if asistente_activo.get(call_id):
-                # CORRECCIÓN V4: Acceso vía calls.call_control.gather_using_ai
+                # SINTAXIS V4: Acceso vía calls.call_control.gather_using_ai
                 telnyx_client.calls.call_control.gather_using_ai(
                     call_id,
                     language="es-MX",
@@ -100,7 +101,7 @@ def hablar(call_id, texto):
         limpiar_archivos_mp3()
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-        # CORRECCIÓN V4: Acceso vía calls.call_control.playback_start
+        # SINTAXIS V4: Acceso vía calls.call_control.playback_start
         telnyx_client.calls.call_control.playback_start(
             call_id,
             audio_url=audio_url
