@@ -10,6 +10,7 @@ from ai import generar_respuesta, texto_a_voz
 
 app = FastAPI()
 
+# Carpeta para audios de ElevenLabs
 if not os.path.exists("static"):
     os.makedirs("static")
 
@@ -18,7 +19,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
-# Control de estado para evitar duplicados
+# Control para evitar el error "Assistant already in progress"
 asistente_activo = {}
 
 @app.post("/webhook")
@@ -41,7 +42,8 @@ async def webhook(request: Request):
 
         elif event_type == "call.answered":
             time.sleep(1.5)
-            hablar(call_id, "Welcome to your English practice. How can I help you today?")
+            # Saludo inicial en ESPAÑOL
+            hablar(call_id, "Hola, soy tu tutor personal. ¿Qué te gustaría practicar en inglés hoy?")
 
         elif event_type in ["call.speak.ended", "call.playback.ended"]:
             if not asistente_activo.get(call_id, False):
@@ -49,7 +51,7 @@ async def webhook(request: Request):
                 client.calls.actions.gather_using_ai(
                     call_id, 
                     parameters={
-                        "language": "en-US",
+                        "language": "es-MX", # Escucha en ESPAÑOL
                         "type": "object",
                         "properties": {
                             "user_input": {"type": "string", "description": "Response"}
@@ -66,7 +68,7 @@ async def webhook(request: Request):
                 hablar(call_id, respuesta)
                 restar_minuto(phone)
             else:
-                hablar(call_id, "I'm sorry, I didn't hear you.")
+                hablar(call_id, "No te escuché bien. ¿Podrías repetirlo?")
 
     except Exception as e:
         print(f"Error Webhook: {e}")
@@ -80,8 +82,10 @@ def hablar(call_id, texto):
         
         if archivo_generado:
             audio_url = f"{MI_URL_RENDER}/static/{filename}"
+            # IMPORTANTE: Playback para usar la voz de ElevenLabs
             client.calls.actions.playback_start(call_id, audio_url=audio_url)
         else:
-            client.calls.actions.speak(call_id, payload=texto, voice="female", language="en-US")
+            # Si ElevenLabs falla, usamos voz de Telnyx en español
+            client.calls.actions.speak(call_id, payload=texto, voice="female", language="es-MX")
     except Exception as e:
         print(f"Error hablar: {e}")
