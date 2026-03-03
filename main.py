@@ -7,12 +7,12 @@ from fastapi.staticfiles import StaticFiles
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
-from elevenlabs import set_api_key, generate_text_to_speech  # versión moderna
+from elevenlabs import ElevenLabs  # versión moderna 2.x
 
 app = FastAPI()
 
-# Inicializar ElevenLabs
-set_api_key(Config.ELEVENLABS_API_KEY)
+# Inicializar ElevenLabs moderno
+client_elevenlabs = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 
 # Crear carpeta static si no existe
 if not os.path.exists("static"):
@@ -94,11 +94,10 @@ async def webhook(request: Request):
 
 def hablar(call_id, texto):
     try:
-        # 1️⃣ Generar audio ElevenLabs (versión moderna)
-        audio_bytes = generate_text_to_speech(
-            texto,
-            voice="alloy",  # tu voz de ElevenLabs
-            model="eleven_multilingual_v1"
+        # 1️⃣ Generar audio ElevenLabs (v2.x)
+        audio_bytes = client_elevenlabs.text_to_speech(
+            text=texto,
+            voice="alloy"
         )
 
         # 2️⃣ Guardar MP3 en static
