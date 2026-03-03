@@ -3,7 +3,7 @@ uvicorn
 supabase
 openai>=1.0.0
 telnyx==4.0.0
-elevenlabs>=3.0.0
+elevenlabs>=1.50.4
 requests
 httpx
 python-dotenv
