@@ -13,9 +13,9 @@ from openai import OpenAI
 
 app = FastAPI()
 
-# 1. CLIENTES (Sintaxis Estricta v4.0.0)
+# 1. Configuración de API Keys (Sintaxis Global)
+telnyx.api_key = Config.TELNYX_API_KEY
 el_client = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
-telnyx_client = telnyx.Telnyx(api_key=Config.TELNYX_API_KEY)
 openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
 VOICE_ID = "WOY6pnQ1WCg0mrOZ54lM"
@@ -34,12 +34,14 @@ async def webhook(request: Request):
         call_id = payload.get("call_control_id")
 
         if event_type == "call.initiated" and call_id:
-            # --- CORRECCIÓN FINAL v4: Esta es la ruta exacta en la v4.0.0 ---
-            telnyx_client.calls.call_control.answer(call_id)
+            # --- SINTAXIS UNIVERSAL TELNYX ---
+            # Esto funciona en v2, v3 y v4 porque llama al recurso directo
+            telnyx.Call.answer(call_id, call_control_id=call_id)
             
-            # ACTIVAMOS EL STREAMING (Directo en .calls.call_control.streaming_start)
-            telnyx_client.calls.call_control.streaming_start(
+            # ACTIVAMOS EL STREAMING (Ruta directa)
+            telnyx.Call.streaming_start(
                 call_id,
+                call_control_id=call_id,
                 stream_url=MI_URL_WSS,
                 stream_track="inbound_track",
                 stream_bidirectional_mode="rtp"
