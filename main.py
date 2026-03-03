@@ -1,6 +1,6 @@
 import time
 import os
-import base64
+import glob
 from telnyx import Telnyx
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
@@ -14,7 +14,7 @@ app = FastAPI()
 # Inicializar ElevenLabs
 set_api_key(Config.ELEVENLABS_API_KEY)
 
-# Crear carpeta static
+# Crear carpeta static si no existe
 if not os.path.exists("static"):
     os.makedirs("static")
 
@@ -24,8 +24,8 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
-# Control de estado por llamada
 asistente_activo = {}
+MAX_MP3_FILES = 20
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -37,24 +37,23 @@ async def webhook(request: Request):
         phone = payload.get("from")
         event_type = event.get("event_type")
 
-        print("Evento recibido:", event_type)
+        print(f"[EVENTO] {event_type} | Call ID: {call_id} | Teléfono: {phone}")
 
-        # 1️⃣ Llamada iniciada
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
+            print(f"[MINUTOS DISPONIBLES] {minutos} para {phone}")
             if minutos > 0:
                 client.calls.actions.answer(call_control_id=call_id)
                 asistente_activo[call_id] = False
             else:
                 client.calls.actions.hangup(call_control_id=call_id)
+                print(f"[HANGUP] Usuario sin minutos: {phone}")
 
-        # 2️⃣ Llamada contestada
         elif event_type == "call.answered":
             time.sleep(1)
             hablar(call_id, "Hola, soy Thorthugo, tu tutor de inglés. ¿Qué quieres practicar hoy?")
 
-        # 3️⃣ Cuando termina de hablar
-        elif event_type in ["call.speak.ended"]:
+        elif event_type in ["call.speak.ended", "call.audio_playback.ended"]:
             if not asistente_activo.get(call_id, False):
                 asistente_activo[call_id] = True
                 client.calls.actions.gather_using_ai(
@@ -63,60 +62,76 @@ async def webhook(request: Request):
                         "language": "es-MX",
                         "type": "object",
                         "properties": {
-                            "user_input": {
-                                "type": "string",
-                                "description": "Respuesta del usuario"
-                            }
+                            "user_input": {"type": "string", "description": "Respuesta del usuario"}
                         },
                         "required": ["user_input"]
                     }
                 )
+                print(f"[GATHER_AI] Iniciado para Call ID: {call_id}")
 
-        # 4️⃣ Cuando termina el gather
         elif event_type == "call.gather.ended":
             asistente_activo[call_id] = False
             transcripcion = payload.get("transcription")
             if transcripcion:
+                print(f"[TRANSCRIPCIÓN] {transcripcion}")
                 respuesta = generar_respuesta(transcripcion)
                 hablar(call_id, respuesta)
                 restar_minuto(phone)
+                print(f"[MINUTOS RESTADOS] Nuevo total para {phone}: {obtener_minutos(phone)}")
             else:
-                hablar(call_id, "No te escuché bien. ¿Podrías repetir?")
+                print(f"[TRANSCRIPCIÓN VACÍA] Repetir para {phone}")
+                hablar(call_id, "No te escuché bien. Por favor, repite.")
 
-        # 5️⃣ Cuando se cuelga
         elif event_type == "call.hangup":
             asistente_activo.pop(call_id, None)
+            print(f"[HANGUP] Llamada finalizada: {call_id}")
 
     except Exception as e:
-        print("Error Webhook:", e)
+        print(f"[ERROR Webhook] {e}")
 
     return Response(status_code=200)
 
 
 def hablar(call_id, texto):
     try:
-        # Generar audio con ElevenLabs
+        # Generar audio ElevenLabs
         audio = generate(
             text=texto,
-            voice="alloy",  # Cambia a tu voz de ElevenLabs
+            voice="alloy",
             model="eleven_multilingual_v1"
         )
-        
-        # Guardar archivo temporal
+
+        # Guardar MP3 en static
         timestamp = int(time.time())
         filename = f"audio_{timestamp}.mp3"
         filepath = os.path.join("static", filename)
         with open(filepath, "wb") as f:
             f.write(audio)
+        print(f"[AUDIO GENERADO] {filename}")
 
-        # Usar URL público de Render para reproducir
+        # Limpiar MP3 antiguos
+        limpiar_archivos_mp3()
+
+        # URL público
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
-        client.calls.actions.speak(
+
+        # Reproducir audio en llamada
+        client.calls.actions.audio_playback_start(
             call_control_id=call_id,
-            payload=texto,      # fallback TTS de Telnyx
-            voice="female",
-            language="es-MX"
+            audio_url=audio_url
         )
+        print(f"[PLAYBACK START] Call ID: {call_id} | URL: {audio_url}")
 
     except Exception as e:
-        print("Error hablar:", e)
+        print(f"[ERROR Hablar] {e}")
+
+
+def limpiar_archivos_mp3():
+    files = sorted(glob.glob("static/audio_*.mp3"), key=os.path.getmtime)
+    if len(files) > MAX_MP3_FILES:
+        for f in files[:-MAX_MP3_FILES]:
+            try:
+                os.remove(f)
+                print(f"[BORRADO] {f}")
+            except:
+                pass
