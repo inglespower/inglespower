@@ -9,15 +9,18 @@ from ai import generar_respuesta, texto_a_voz
 
 app = FastAPI()
 
+# Crear carpeta static si no existe
 if not os.path.exists("static"):
     os.makedirs("static")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Cliente Telnyx
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
+# Estado por llamada
 asistente_activo = {}
 
 @app.post("/webhook")
@@ -32,6 +35,7 @@ async def webhook(request: Request):
 
         print("Evento:", event_type)
 
+        # Cuando inicia la llamada
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
 
@@ -41,10 +45,12 @@ async def webhook(request: Request):
             else:
                 client.calls.actions.hangup(call_control_id=call_id)
 
+        # Cuando la llamada es contestada
         elif event_type == "call.answered":
             time.sleep(1.5)
             hablar(call_id, "Hola, soy Thorthugo, tu tutor de inglés. ¿Qué quieres practicar hoy?")
 
+        # Cuando termina de hablar o reproducir audio
         elif event_type in ["call.speak.ended", "call.playback.ended"]:
             if not asistente_activo.get(call_id, False):
                 asistente_activo[call_id] = True
@@ -64,6 +70,7 @@ async def webhook(request: Request):
                     }
                 )
 
+        # Cuando termina el gather
         elif event_type == "call.gather.ended":
             asistente_activo[call_id] = False
             transcripcion = payload.get("transcription")
@@ -75,6 +82,7 @@ async def webhook(request: Request):
             else:
                 hablar(call_id, "No te escuché bien. ¿Podrías repetir?")
 
+        # Cuando se cuelga
         elif event_type == "call.hangup":
             asistente_activo.pop(call_id, None)
 
@@ -94,7 +102,7 @@ def hablar(call_id, texto):
         if archivo_generado:
             audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-            client.calls.actions.playback_start(
+            client.calls.actions.audio_playback_start(
                 call_control_id=call_id,
                 audio_url=audio_url
             )
