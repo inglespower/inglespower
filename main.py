@@ -7,20 +7,23 @@ from telnyx import Telnyx
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
-from elevenlabs import ElevenLabs  # versión 2.x
+from elevenlabs.client import ElevenLabs  # Importación oficial v2.x
 
 app = FastAPI()
 
-# Inicializar ElevenLabs 2.x
+# Inicializar ElevenLabs con tu API KEY de Config
 client_elevenlabs = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 
-# Carpeta static
+# ID de tu voz personalizada Thorthugo
+VOICE_ID = "WOY6pnQ1WCg0mrOZ54lM"
+
+# Carpeta static para archivos temporales
 if not os.path.exists("static"):
     os.makedirs("static")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Telnyx
+# Configuración Telnyx
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
@@ -52,7 +55,7 @@ async def webhook(request: Request):
 
         elif event_type == "call.answered":
             time.sleep(1)
-            hablar(call_id, "Hola, soy Thorthugo, tu tutor de inglés. ¿Qué quieres practicar hoy?")
+            hablar(call_id, "Hi! I'm Thorthugo, your English tutor. What would you like to practice today?")
 
         elif event_type in ["call.speak.ended", "call.audio_playback.ended"]:
             if asistente_activo.get(call_id, False):
@@ -60,10 +63,10 @@ async def webhook(request: Request):
                     client.calls.actions.gather_using_ai(
                         call_control_id=call_id,
                         parameters={
-                            "language": "es-MX",
+                            "language": "en-US", # Cambiado a inglés para mejor detección del tutor
                             "type": "object",
                             "properties": {
-                                "user_input": {"type": "string", "description": "Respuesta del usuario"}
+                                "user_input": {"type": "string", "description": "User's English response"}
                             },
                             "required": ["user_input"]
                         }
@@ -81,7 +84,7 @@ async def webhook(request: Request):
                 restar_minuto(phone)
                 hablar(call_id, respuesta)
             else:
-                hablar(call_id, "No te escuché bien. Por favor, repite.")
+                hablar(call_id, "I'm sorry, I didn't catch that. Could you repeat please?")
 
         elif event_type == "call.hangup":
             asistente_activo.pop(call_id, None)
@@ -95,44 +98,48 @@ async def webhook(request: Request):
 
 def hablar(call_id, texto):
     if not asistente_activo.get(call_id, False):
-        print(f"[INFO] Call ID {call_id} no está activa, no se reproduce audio")
+        print(f"[INFO] Call ID {call_id} no está activa, cancelando audio")
         return
 
     try:
-        # Generar audio con ElevenLabs 2.x
-        audio_bytes = client_elevenlabs.generate(
+        # Generar audio usando el generador de ElevenLabs v2
+        audio_generator = client_elevenlabs.generate(
             text=texto,
-            voice="alloy"
+            voice=VOICE_ID, 
+            model="eleven_multilingual_v2"
         )
+        
+        # Unir los chunks del generador en un solo bloque de bytes
+        audio_bytes = b"".join(audio_generator)
 
-        # Guardar MP3 en static
-        timestamp = int(time.time())
+        # Crear nombre de archivo único con milisegundos
+        timestamp = int(time.time() * 1000)
         filename = f"audio_{timestamp}.mp3"
         filepath = os.path.join("static", filename)
+        
         with open(filepath, "wb") as f:
             f.write(audio_bytes)
 
-        # Limpiar archivos antiguos
         limpiar_archivos_mp3()
 
-        # URL público
+        # URL final para Telnyx
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-        # Reproducir en la llamada
+        # Iniciar reproducción en la llamada
         try:
             client.calls.actions.audio_playback_start(
                 call_control_id=call_id,
                 audio_url=audio_url
             )
-            print(f"[PLAYBACK START] Call ID: {call_id} | URL: {audio_url}")
+            print(f"[PLAYBACK START] Thorthugo dice: {texto[:50]}...")
         except Exception as e:
             if "90018" in str(e):
-                print(f"[CALL YA TERMINADA] No se puede reproducir audio para {call_id}")
+                print(f"[CALL YA TERMINADA] No se pudo reproducir audio")
             else:
                 print(f"[ERROR Playback] {e}")
 
     except Exception as e:
-        print(f"[ERROR Hablar] {e}")
+        print(f"[ERROR ElevenLabs Hablar] {e}")
 
 
 def limpiar_archivos_mp3():
@@ -141,6 +148,6 @@ def limpiar_archivos_mp3():
         for f in files[:-MAX_MP3_FILES]:
             try:
                 os.remove(f)
-                print(f"[BORRADO] {f}")
+                print(f"[CLEANUP] Borrado: {f}")
             except:
                 pass
