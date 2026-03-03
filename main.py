@@ -13,9 +13,9 @@ from openai import OpenAI
 
 app = FastAPI()
 
-# 1. CLIENTES (Sintaxis Estricta v4.0.0)
+# 1. CLIENTES (Sintaxis Estricta para Telnyx v4.0.0)
 el_client = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
-# El cliente se instancia así en la v4 para que tenga todos los métodos
+# En v4, DEBES instanciar el cliente así para que reconozca los comandos
 telnyx_client = telnyx.Telnyx(api_key=Config.TELNYX_API_KEY)
 openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
@@ -25,6 +25,7 @@ MI_URL_WSS = "wss://://inglespower.onrender.com"
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
+        # PROTECCIÓN: Leer el cuerpo como texto para evitar el JSONDecodeError
         body = await request.body()
         if not body: return Response(status_code=200)
         data = json.loads(body)
@@ -34,11 +35,11 @@ async def webhook(request: Request):
         call_id = payload.get("call_control_id")
 
         if event_type == "call.initiated" and call_id:
-            # SINTAXIS v4: Se usa telnyx_client.calls.answer
-            telnyx_client.calls.answer(call_id)
+            # --- CORRECCIÓN v4: En la v4 se usa el cliente y el método 'calls.call_control.answer' ---
+            telnyx_client.calls.call_control.answer(call_id)
             
-            # ACTIVAMOS EL STREAMING (En v4 es streaming_start)
-            telnyx_client.calls.streaming_start(
+            # ACTIVAMOS EL STREAMING (En v4 el comando es 'streaming_start')
+            telnyx_client.calls.call_control.streaming_start(
                 call_id,
                 stream_url=MI_URL_WSS,
                 stream_track="inbound_track",
@@ -67,9 +68,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 await thorthugo_habla(websocket, "Hi! I'm Thorthugo. I'm ready to practice English. Tell me something!")
 
             elif msg["event"] == "media":
+                # Recibimos audio del usuario (Base64)
                 chunk = base64.b64decode(msg["media"]["payload"])
                 audio_buffer.extend(chunk)
 
+                # Si tenemos audio acumulado (~2 seg), Whisper lo "escucha"
                 if len(audio_buffer) > 32000:
                     audio_file = io.BytesIO(audio_buffer)
                     audio_file.name = "audio.wav"
@@ -86,6 +89,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def thorthugo_habla(websocket, texto):
     try:
+        # ElevenLabs Stream = Thorthugo habla MIENTRAS se genera la voz
         audio_stream = el_client.generate(text=texto, voice=VOICE_ID, model="eleven_multilingual_v2", stream=True)
         for chunk in audio_stream:
             if chunk:
