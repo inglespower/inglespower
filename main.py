@@ -3,7 +3,7 @@ import time
 import glob
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
-from telnyx import Telnyx
+import telnyx # Importación estándar
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
@@ -20,8 +20,8 @@ if not os.path.exists("static"):
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Inicialización Telnyx
-client = Telnyx(api_key=Config.TELNYX_API_KEY)
+# Inicialización Telnyx - USANDO LA CLAVE DIRECTAMENTE
+telnyx.api_key = Config.TELNYX_API_KEY
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
 asistente_activo = {}
@@ -42,11 +42,11 @@ async def webhook(request: Request):
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                # Forma correcta de contestar
-                client.calls.actions.answer(call_control_id=call_id)
+                # Contestamos la llamada
+                telnyx.Call.answer(call_id, call_control_id=call_id)
                 asistente_activo[call_id] = True
             else:
-                client.calls.actions.hangup(call_control_id=call_id)
+                telnyx.Call.hangup(call_id, call_control_id=call_id)
 
         elif event_type == "call.answered":
             time.sleep(1)
@@ -54,7 +54,9 @@ async def webhook(request: Request):
 
         elif event_type in ["call.speak.ended", "call.audio_playback.ended"]:
             if asistente_activo.get(call_id, False):
-                client.calls.actions.gather_using_ai(
+                # Activar el micrófono
+                telnyx.Call.gather_using_ai(
+                    call_id,
                     call_control_id=call_id,
                     parameters={
                         "language": "en-US",
@@ -82,7 +84,7 @@ def hablar(call_id, texto):
     if not asistente_activo.get(call_id, False): return
 
     try:
-        # 1. Generar audio
+        # 1. Generar audio con ElevenLabs
         audio_stream = client_elevenlabs.text_to_speech.convert(
             voice_id=VOICE_ID,
             text=texto,
@@ -99,13 +101,15 @@ def hablar(call_id, texto):
         limpiar_archivos_mp3()
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-        # --- CORRECCIÓN CRÍTICA DE TELNYX ---
-        # No uses client.calls.actions.audio_playback_start
-        # Debes recuperar la llamada y usar .playback_start()
+        # --- CORRECCIÓN FINAL TELNYX ---
+        # En la SDK de Python, se usa la clase telnyx.Call directamente pasándole el call_control_id
         try:
-            call = client.Call.retrieve(call_id)
-            call.playback_start(audio_url=audio_url)
-            print(f"[EXITO] Reproduciendo audio: {audio_url}")
+            telnyx.Call.playback_start(
+                call_id, # El primer argumento suele ser el identificador en la SDK
+                call_control_id=call_id, 
+                audio_url=audio_url
+            )
+            print(f"[EXITO] Thorthugo hablando: {audio_url}")
         except Exception as e:
             print(f"[ERROR Telnyx Playback] {e}")
 
