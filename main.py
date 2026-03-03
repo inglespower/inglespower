@@ -13,9 +13,10 @@ from openai import OpenAI
 
 app = FastAPI()
 
-# 1. Configuración de API Keys (Sintaxis Global)
-telnyx.api_key = Config.TELNYX_API_KEY
+# 1. CLIENTES (Sintaxis Estricta v4.0.0)
 el_client = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
+# El cliente se instancia así en la v4 para que tenga todos los métodos
+telnyx_client = telnyx.Telnyx(api_key=Config.TELNYX_API_KEY)
 openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
 VOICE_ID = "WOY6pnQ1WCg0mrOZ54lM"
@@ -24,7 +25,6 @@ MI_URL_WSS = "wss://://inglespower.onrender.com"
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
-        # PROTECCIÓN: Leer el cuerpo como texto para evitar el error de tu imagen
         body = await request.body()
         if not body: return Response(status_code=200)
         data = json.loads(body)
@@ -34,14 +34,12 @@ async def webhook(request: Request):
         call_id = payload.get("call_control_id")
 
         if event_type == "call.initiated" and call_id:
-            # --- SINTAXIS UNIVERSAL TELNYX ---
-            # Esto funciona en v2, v3 y v4 porque llama al recurso directo
-            telnyx.Call.answer(call_id, call_control_id=call_id)
+            # SINTAXIS v4: Se usa telnyx_client.calls.answer
+            telnyx_client.calls.answer(call_id)
             
-            # ACTIVAMOS EL STREAMING (Ruta directa)
-            telnyx.Call.streaming_start(
+            # ACTIVAMOS EL STREAMING (En v4 es streaming_start)
+            telnyx_client.calls.streaming_start(
                 call_id,
-                call_control_id=call_id,
                 stream_url=MI_URL_WSS,
                 stream_track="inbound_track",
                 stream_bidirectional_mode="rtp"
