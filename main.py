@@ -15,8 +15,9 @@ from telnyx_sms import enviar_link_pago
 
 app = FastAPI()
 
-# 1. GLOBAL CONFIG (Sintaxis v3)
-telnyx.api_key = Config.TELNYX_API_KEY
+# 1. INSTANTIATE CLIENTS (The "Safe" Way)
+# We create a specific client object to avoid "attribute" errors
+telnyx_sdk = telnyx.Telnyx(api_key=Config.TELNYX_API_KEY)
 el_client = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 
@@ -36,25 +37,23 @@ async def webhook(request: Request):
         phone = payload.get("from")
 
         if event_type == "call.initiated" and call_id:
-            print(f"[LLAMADA] Entrante de: {phone}")
+            print(f"[CALL] Incoming from: {phone}")
             minutos = obtener_minutos(phone)
             
             if minutos > 0:
-                # CONTESTAR
-                telnyx.Call.answer(call_id, call_control_id=call_id)
+                # USE THE SDK CLIENT (Works in all versions)
+                telnyx_sdk.calls.answer(call_id)
                 
-                # ACTIVAR STREAMING (Low Latency)
-                telnyx.Call.streaming_start(
+                # START STREAMING
+                telnyx_sdk.calls.streaming_start(
                     call_id,
-                    call_control_id=call_id,
                     stream_url=MI_URL_WSS,
                     stream_track="inbound_track",
                     stream_bidirectional_mode="rtp"
                 )
-                print(f"[OK] Stream solicitado para {call_id}")
+                print(f"[OK] Stream started for {call_id}")
             else:
-                print(f"[BLOQUEO] {phone} sin minutos. Colgando y enviando SMS.")
-                telnyx.Call.hangup(call_id, call_control_id=call_id)
+                telnyx_sdk.calls.hangup(call_id)
                 enviar_link_pago(phone)
 
     except Exception as e:
@@ -64,7 +63,7 @@ async def webhook(request: Request):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("[WS] Thorthugo conectado al túnel de audio")
+    print("[WS] Thorthugo Connected!")
     
     audio_buffer = bytearray()
 
@@ -74,31 +73,20 @@ async def websocket_endpoint(websocket: WebSocket):
             msg = json.loads(data)
 
             if msg["event"] == "start":
-                # THORTHUGO HABLA PRIMERO (Saludo inicial)
-                print("[WS] Stream activo. Saludando...")
-                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo, tu tutor de inglés. Estoy listo para practicar contigo. ¿De qué quieres hablar hoy?")
+                await thorthugo_habla(websocket, "Hi! I am Thorthugo. I am finally working! Let's talk.")
 
             elif msg["event"] == "media":
-                # Recibimos audio del usuario (Base64)
                 chunk = base64.b64decode(msg["media"]["payload"])
                 audio_buffer.extend(chunk)
 
-                # Procesar cada ~2 segundos con Whisper
                 if len(audio_buffer) > 32000:
                     buffer_file = io.BytesIO(audio_buffer)
                     buffer_file.name = "audio.wav"
+                    transcript = openai_client.audio.transcriptions.create(model="whisper-1", file=buffer_file)
                     
-                    transcript = openai_client.audio.transcriptions.create(
-                        model="whisper-1", 
-                        file=buffer_file
-                    )
-                    
-                    user_text = transcript.text
-                    if user_text.strip():
-                        print(f"[USER]: {user_text}")
-                        # Generar respuesta de IA
-                        respuesta = generar_respuesta(user_text)
-                        # Hablar de vuelta por el stream
+                    if transcript.text.strip():
+                        print(f"[USER]: {transcript.text}")
+                        respuesta = generar_respuesta(transcript.text)
                         await thorthugo_habla(websocket, respuesta)
                     
                     audio_buffer.clear()
@@ -107,20 +95,11 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"[WS DISCONNECTED] {e}")
 
 async def thorthugo_habla(websocket, texto):
-    """Streaming de ElevenLabs directo al Websocket de Telnyx"""
     try:
-        audio_stream = el_client.generate(
-            text=texto, 
-            voice=VOICE_ID, 
-            model="eleven_multilingual_v2", 
-            stream=True
-        )
+        audio_stream = el_client.generate(text=texto, voice=VOICE_ID, model="eleven_multilingual_v2", stream=True)
         for chunk in audio_stream:
             if chunk:
                 encoded = base64.b64encode(chunk).decode("utf-8")
-                await websocket.send_json({
-                    "event": "media", 
-                    "media": {"payload": encoded}
-                })
+                await websocket.send_json({"event": "media", "media": {"payload": encoded}})
     except Exception as e:
         print(f"[ERR ELEVENLABS] {e}")
