@@ -3,6 +3,7 @@ import json
 import base64
 import asyncio
 import io
+import time
 from fastapi import FastAPI, Request, Response, WebSocket
 import telnyx
 from config import Config
@@ -23,7 +24,7 @@ MI_URL_WSS = "wss://://inglespower.onrender.com"
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
-        # Evitar el error de lectura de JSON vacío
+        # PROTECCIÓN: Leer el cuerpo como texto para evitar el error de tu imagen
         body = await request.body()
         if not body: return Response(status_code=200)
         data = json.loads(body)
@@ -33,10 +34,10 @@ async def webhook(request: Request):
         call_id = payload.get("call_control_id")
 
         if event_type == "call.initiated" and call_id:
-            # CORRECCIÓN V4: Se usa calls.call_control.answer
+            # --- CORRECCIÓN FINAL v4: Esta es la ruta exacta en la v4.0.0 ---
             telnyx_client.calls.call_control.answer(call_id)
             
-            # INICIAMOS EL STREAMING (Tiempo Real)
+            # ACTIVAMOS EL STREAMING (Directo en .calls.call_control.streaming_start)
             telnyx_client.calls.call_control.streaming_start(
                 call_id,
                 stream_url=MI_URL_WSS,
@@ -52,7 +53,7 @@ async def webhook(request: Request):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("[WS] ¡Canal de audio conectado!")
+    print("[WS] ¡Thorthugo conectado al flujo de audio!")
     
     audio_buffer = bytearray()
 
@@ -62,52 +63,33 @@ async def websocket_endpoint(websocket: WebSocket):
             msg = json.loads(data)
 
             if msg["event"] == "start":
-                # Thorthugo habla primero al conectarse el audio
-                print("[WS] Thorthugo saludando...")
-                await thorthugo_habla_stream(websocket, "¡Hola! Soy Thorthugo. Estoy listo para practicar inglés contigo. ¿De qué quieres hablar?")
+                print("[WS] Stream activo. Thorthugo saludando...")
+                await thorthugo_habla(websocket, "Hi! I'm Thorthugo. I'm ready to practice English. Tell me something!")
 
             elif msg["event"] == "media":
-                # Recibimos audio del usuario (Base64)
                 chunk = base64.b64decode(msg["media"]["payload"])
                 audio_buffer.extend(chunk)
 
-                # Si tenemos ~2 segundos de audio, procesamos con Whisper
                 if len(audio_buffer) > 32000:
                     audio_file = io.BytesIO(audio_buffer)
                     audio_file.name = "audio.wav"
-                    
-                    transcript = openai_client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio_file
-                    )
-                    
+                    transcript = openai_client.audio.transcriptions.create(model="whisper-1", file=audio_file)
                     user_text = transcript.text
                     if user_text.strip():
                         print(f"[USER]: {user_text}")
                         ai_response = generar_respuesta(user_text)
-                        await thorthugo_habla_stream(websocket, ai_response)
-                    
+                        await thorthugo_habla(websocket, ai_response)
                     audio_buffer.clear()
 
     except Exception as e:
         print(f"[WS ERROR] {e}")
 
-async def thorthugo_habla_stream(websocket, texto):
-    """Genera audio con ElevenLabs y lo inyecta al stream sin archivos"""
+async def thorthugo_habla(websocket, texto):
     try:
-        audio_stream = el_client.generate(
-            text=texto,
-            voice=VOICE_ID,
-            model="eleven_multilingual_v2",
-            stream=True
-        )
-
+        audio_stream = el_client.generate(text=texto, voice=VOICE_ID, model="eleven_multilingual_v2", stream=True)
         for chunk in audio_stream:
             if chunk:
                 encoded = base64.b64encode(chunk).decode("utf-8")
-                await websocket.send_json({
-                    "event": "media",
-                    "media": {"payload": encoded}
-                })
+                await websocket.send_json({"event": "media", "media": {"payload": encoded}})
     except Exception as e:
         print(f"[ERR ELEVENLABS STREAM] {e}")
