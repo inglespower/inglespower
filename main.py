@@ -9,18 +9,15 @@ from ai import generar_respuesta, texto_a_voz
 
 app = FastAPI()
 
-# Crear carpeta static si no existe
 if not os.path.exists("static"):
     os.makedirs("static")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Cliente Telnyx v4
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
-# Control de estado por llamada
 asistente_activo = {}
 
 @app.post("/webhook")
@@ -33,32 +30,29 @@ async def webhook(request: Request):
         phone = payload.get("from")
         event_type = event.get("event_type")
 
-        print("Evento recibido:", event_type)
+        print("Evento:", event_type)
 
-        # 1️⃣ Cuando inicia la llamada
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
 
             if minutos > 0:
-                client.calls.answer(call_control_id=call_id)
+                client.calls.actions.answer(call_control_id=call_id)
                 asistente_activo[call_id] = False
             else:
-                client.calls.hangup(call_control_id=call_id)
+                client.calls.actions.hangup(call_control_id=call_id)
 
-        # 2️⃣ Cuando se contesta
         elif event_type == "call.answered":
             time.sleep(1.5)
             hablar(call_id, "Hola, soy Thorthugo, tu tutor de inglés. ¿Qué quieres practicar hoy?")
 
-        # 3️⃣ Cuando termina de hablar o reproducir audio
         elif event_type in ["call.speak.ended", "call.playback.ended"]:
             if not asistente_activo.get(call_id, False):
                 asistente_activo[call_id] = True
 
-                client.calls.gather_using_ai(
+                client.calls.actions.gather_using_ai(
                     call_control_id=call_id,
-                    language="es-MX",
                     parameters={
+                        "language": "es-MX",
                         "type": "object",
                         "properties": {
                             "user_input": {
@@ -70,7 +64,6 @@ async def webhook(request: Request):
                     }
                 )
 
-        # 4️⃣ Cuando termina la grabación del usuario
         elif event_type == "call.gather.ended":
             asistente_activo[call_id] = False
             transcripcion = payload.get("transcription")
@@ -82,7 +75,6 @@ async def webhook(request: Request):
             else:
                 hablar(call_id, "No te escuché bien. ¿Podrías repetir?")
 
-        # 5️⃣ Cuando termina la llamada
         elif event_type == "call.hangup":
             asistente_activo.pop(call_id, None)
 
@@ -102,13 +94,12 @@ def hablar(call_id, texto):
         if archivo_generado:
             audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-            client.calls.playback_start(
+            client.calls.actions.playback_start(
                 call_control_id=call_id,
                 audio_url=audio_url
             )
         else:
-            # Fallback si falla TTS externo
-            client.calls.speak(
+            client.calls.actions.speak(
                 call_control_id=call_id,
                 payload=texto,
                 voice="female",
