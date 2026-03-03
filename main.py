@@ -1,31 +1,32 @@
-import time
 import os
+import time
 import glob
-from telnyx import Telnyx
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
+from telnyx import Telnyx
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
-from elevenlabs import ElevenLabs  # versión moderna 2.x
+from elevenlabs import ElevenLabs  # versión 2.x
 
 app = FastAPI()
 
-# Inicializar ElevenLabs
+# Inicializar ElevenLabs 2.x
 client_elevenlabs = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 
-# Crear carpeta static si no existe
+# Carpeta static
 if not os.path.exists("static"):
     os.makedirs("static")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Cliente Telnyx
+# Telnyx
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
+# Control de llamadas activas
 asistente_activo = {}
-MAX_MP3_FILES = 20  # Máximo de archivos MP3 guardados
+MAX_MP3_FILES = 20
 
 
 @app.post("/webhook")
@@ -45,6 +46,7 @@ async def webhook(request: Request):
             if minutos > 0:
                 client.calls.actions.answer(call_control_id=call_id)
                 asistente_activo[call_id] = True
+                print(f"[MINUTOS DISPONIBLES] {minutos} para {phone}")
             else:
                 client.calls.actions.hangup(call_control_id=call_id)
 
@@ -97,7 +99,7 @@ def hablar(call_id, texto):
         return
 
     try:
-        # Generar audio ElevenLabs
+        # Generar audio con ElevenLabs 2.x
         audio_bytes = client_elevenlabs.generate(
             text=texto,
             voice="alloy"
