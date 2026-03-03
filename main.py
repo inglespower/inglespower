@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
-from elevenlabs import generate, set_api_key
+from elevenlabs import generate, set_api_key  # versión 1.0.0
 
 app = FastAPI()
 
@@ -94,14 +94,14 @@ async def webhook(request: Request):
 
 def hablar(call_id, texto):
     try:
-        # Generar audio ElevenLabs
+        # 1️⃣ Generar audio ElevenLabs
         audio = generate(
             text=texto,
             voice="alloy",
             model="eleven_multilingual_v1"
         )
 
-        # Guardar MP3 en static
+        # 2️⃣ Guardar MP3 en static
         timestamp = int(time.time())
         filename = f"audio_{timestamp}.mp3"
         filepath = os.path.join("static", filename)
@@ -109,13 +109,13 @@ def hablar(call_id, texto):
             f.write(audio)
         print(f"[AUDIO GENERADO] {filename}")
 
-        # Limpiar MP3 antiguos
+        # 3️⃣ Limpiar archivos antiguos
         limpiar_archivos_mp3()
 
-        # URL público
+        # 4️⃣ URL público
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-        # Reproducir audio en llamada
+        # 5️⃣ Reproducir en la llamada
         client.calls.actions.audio_playback_start(
             call_control_id=call_id,
             audio_url=audio_url
