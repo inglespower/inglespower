@@ -15,10 +15,10 @@ def generar_respuesta(texto_usuario):
                 {
                     "role": "system", 
                     "content": (
-                        "Eres un tutor de inglés nativo pero que habla ESPAÑOL perfecto para enseñar. "
-                        "Responde siempre en ESPAÑOL de forma amable y breve (máximo 2 frases). "
-                        "Si el usuario intenta hablar inglés, corrígelo sutilmente en español. "
-                        "Si no sabe algo, enséñale la frase correcta en inglés y explícaselo en español."
+                        "Eres un tutor de inglés nativo experto en enseñar a hispanohablantes. "
+                        "DEBES RESPONDER SIEMPRE EN ESPAÑOL de forma amable y muy breve (máximo 2 frases). "
+                        "Si el usuario te pregunta algo en español, respóndele en español y enséñale la traducción al inglés. "
+                        "Si el usuario intenta hablar inglés, corrígelo sutilmente en español."
                     )
                 },
                 {"role": "user", "content": texto_usuario}
@@ -30,7 +30,7 @@ def generar_respuesta(texto_usuario):
         return "Lo siento, tuve un problema al procesar tu respuesta. ¿Puedes repetir?"
 
 def texto_a_voz(texto, filepath):
-    """Convierte texto a audio realista usando tu VOICE_ID."""
+    """Convierte texto a audio realista usando tu VOICE_ID de ElevenLabs."""
     try:
         # Usamos el modelo multilingual_v2 para que el acento español sea natural
         audio_generator = client_el.generate(
@@ -45,6 +45,5 @@ def texto_a_voz(texto, filepath):
                     f.write(chunk)
         return filepath
     except Exception as e:
-        # Si ves este error en Render, revisa tu saldo en ElevenLabs
         print(f"Error crítico en ElevenLabs: {e}")
         return None
