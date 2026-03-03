@@ -1,26 +1,19 @@
 from openai import OpenAI
-from elevenlabs.client import ElevenLabs # Importación del cliente v1.x
+from elevenlabs.client import ElevenLabs
 from config import Config
 
-# Inicialización de clientes
 client_openai = OpenAI(api_key=Config.OPENAI_API_KEY)
-
-# IMPORTANTE: Inicializamos el cliente con un nombre distinto (client_el)
+# Inicialización correcta del cliente v1.x
 client_el = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 
 def generar_respuesta(texto_usuario):
-    """Genera respuesta breve del tutor en ESPAÑOL."""
     try:
         response = client_openai.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {
                     "role": "system", 
-                    "content": (
-                        "Eres un tutor de inglés nativo. REGLA DE ORO: RESPONDE SIEMPRE EN ESPAÑOL. "
-                        "Sé amable y muy breve (máximo 2 frases). "
-                        "Explica en español y da el ejemplo en inglés."
-                    )
+                    "content": "Eres un tutor de inglés. RESPONDE SIEMPRE EN ESPAÑOL. Sé breve y amable. Máximo 2 frases."
                 },
                 {"role": "user", "content": texto_usuario}
             ]
@@ -28,25 +21,25 @@ def generar_respuesta(texto_usuario):
         return response.choices.message.content
     except Exception as e:
         print(f"Error OpenAI: {e}")
-        return "Lo siento, tuve un problema. ¿Puedes repetir?"
+        return "Lo siento, tuve un problema técnico."
 
 def texto_a_voz(texto, filepath):
-    """Convierte texto a audio con la SINTAXIS CORREGIDA para SDK v1+."""
+    """Genera audio usando la ruta de comando estándar de la v1.x."""
     try:
-        # CORRECCIÓN DEFINITIVA: Se usa client_el.generate
-        audio_generator = client_el.generate(
+        # SINTAXIS PARA SDK v1.x: Usamos text_to_speech.convert para evitar errores de atributo
+        audio_generator = client_el.text_to_speech.convert(
+            voice_id=Config.ELEVENLABS_VOICE_ID,
             text=texto,
-            voice=Config.ELEVENLABS_VOICE_ID, 
-            model="eleven_multilingual_v2"
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128"
         )
         
-        # Guardamos el archivo físico en el servidor
         with open(filepath, "wb") as f:
             for chunk in audio_generator:
                 if chunk:
                     f.write(chunk)
         return filepath
     except Exception as e:
-        # Si esto falla, el log de Render dirá la razón real
-        print(f"FALLO REAL ELEVENLABS: {e}")
+        # Si escuchas voz de robot, este mensaje en Render te dirá por qué falló
+        print(f"FALLO CRÍTICO ELEVENLABS: {e}")
         return None
