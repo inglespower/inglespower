@@ -10,12 +10,12 @@ from ai import generar_respuesta, texto_a_voz
 
 app = FastAPI()
 
-# Asegurar carpeta static
 if not os.path.exists("static"):
     os.makedirs("static")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# INICIALIZACIÓN MODERNA PARA v4.0.0
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
@@ -31,48 +31,56 @@ async def webhook(request: Request):
         phone = payload.get("from")
         event_type = event.get("event_type")
 
+        # 1. Entrada de llamada
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
+                print(f"Llamada aceptada: {phone}. Saldo: {minutos}")
                 client.calls.actions.answer(call_id)
                 asistente_activo[call_id] = False
             else:
                 client.calls.actions.hangup(call_id)
 
+        # 2. Saludo inicial en Español
         elif event_type == "call.answered":
             time.sleep(1.5)
-            hablar(call_id, "Hola, soy tu tutor personal. ¿Qué te gustaría practicar hoy?")
+            hablar(call_id, "Hola, soy Thorthugo, tu tutor personal de inglés. ¿Qué quieres practicar hoy?")
 
+        # 3. Activar escucha en Español (es-MX)
         elif event_type in ["call.speak.ended", "call.playback.ended"]:
             if not asistente_activo.get(call_id, False):
                 asistente_activo[call_id] = True
                 client.calls.actions.gather_using_ai(
                     call_id, 
                     parameters={
-                        "language": "es-MX", # Escucha español perfecto
+                        "language": "es-MX", 
                         "type": "object",
                         "properties": {
-                            "user_input": {"type": "string", "description": "Respuesta"}
+                            "user_input": {"type": "string", "description": "Response"}
                         },
                         "required": ["user_input"]
                     }
                 )
 
+        # 4. Procesar respuesta del alumno
         elif event_type == "call.gather.ended":
             asistente_activo[call_id] = False
             transcripcion = payload.get("transcription")
             if transcripcion:
-                respuesta = generar_respuesta(transcripcion)
-                hablar(call_id, respuesta)
+                print(f"Usuario: {transcripcion}")
+                respuesta_texto = generar_respuesta(transcripcion)
+                hablar(call_id, respuesta_texto)
                 restar_minuto(phone)
             else:
-                hablar(call_id, "No te escuché bien. ¿Podrías repetir?")
+                hablar(call_id, "No te escuché bien. ¿Podrías repetirlo?")
 
     except Exception as e:
-        print(f"Error Webhook: {e}")
+        print(f"Error en Webhook: {e}")
+
     return Response(status_code=200)
 
 def hablar(call_id, texto):
+    """Reproduce audio de ElevenLabs usando el comando correcto de Telnyx v4."""
     try:
         filename = f"audio_{int(time.time())}.mp3"
         filepath = os.path.join("static", filename)
@@ -80,11 +88,10 @@ def hablar(call_id, texto):
         
         if archivo_generado:
             audio_url = f"{MI_URL_RENDER}/static/{filename}"
-            # ESTE COMANDO ACTIVA TU VOZ DE ELEVENLABS
-            client.calls.actions.playback_start(call_id, audio_url=audio_url)
+            # COMANDO CORRECTO PARA v4.0.0
+            client.calls.actions.audio_playback_start(call_id, audio_url=audio_url)
         else:
-            # Si esto sale, la voz será robótica (Voz de Telnyx)
-            print("ElevenLabs falló, usando voz de respaldo...")
+            # Fallback si falla ElevenLabs
             client.calls.actions.speak(call_id, payload=texto, voice="female", language="es-MX")
     except Exception as e:
         print(f"Error hablar: {e}")
