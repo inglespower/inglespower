@@ -1,18 +1,24 @@
-from telnyx import Telnyx
+import telnyx
 from config import Config
 
-# INICIALIZACIÓN MODERNA (V4)
-client = Telnyx(api_key=Config.TELNYX_API_KEY)
+# Configuración v3
+telnyx.api_key = Config.TELNYX_API_KEY
 
-def enviar_sms(destinatario, mensaje):
+def enviar_link_pago(phone_number):
+    """Envía SMS con link de pago si el usuario no tiene minutos."""
     try:
-        # CORRECCIÓN: Usamos client.messages.create en lugar de telnyx.Message.create
-        client.messages.create(
-            from_="+1XXXXXXXXXX", # REEMPLAZA CON TU NÚMERO DE TELNYX
-            to=destinatario,
-            text=mensaje,
-            messaging_profile_id=Config.TELNYX_MESSAGING_PROFILE_ID
+        # Reemplaza con tu link real de Stripe/PayPal
+        pago_url = "https://tu-sitio.com"
+        mensaje = f"Thorthugo: Te has quedado sin minutos. Recarga aquí para seguir practicando: {pago_url}"
+
+        # SINTAXIS v3
+        telnyx.Message.create(
+            from_="+12029604000", # Reemplaza por tu número de Telnyx con SMS activo
+            to=phone_number,
+            text=mensaje
         )
-        print(f"SMS enviado a {destinatario}")
+        print(f"[SMS] Link enviado a {phone_number}")
+        return True
     except Exception as e:
-        print(f"Error al enviar SMS: {e}")
+        print(f"[ERR SMS] {e}")
+        return False
