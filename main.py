@@ -11,7 +11,7 @@ from elevenlabs import ElevenLabs  # versión moderna 2.x
 
 app = FastAPI()
 
-# Inicializar ElevenLabs moderno
+# Inicializar ElevenLabs
 client_elevenlabs = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 
 # Crear carpeta static si no existe
@@ -94,8 +94,8 @@ async def webhook(request: Request):
 
 def hablar(call_id, texto):
     try:
-        # 1️⃣ Generar audio ElevenLabs (v2.x)
-        audio_bytes = client_elevenlabs.text_to_speech(
+        # 1️⃣ Generar audio ElevenLabs (v2.x) usando .generate()
+        audio_bytes = client_elevenlabs.generate(
             text=texto,
             voice="alloy"
         )
