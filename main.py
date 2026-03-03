@@ -3,7 +3,7 @@ import time
 import glob
 from fastapi import FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
-import telnyx # Importación estándar
+import telnyx
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
@@ -11,55 +11,58 @@ from elevenlabs.client import ElevenLabs
 
 app = FastAPI()
 
-# Inicialización ElevenLabs
-client_elevenlabs = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
+# 1. Instanciar Cliente ElevenLabs (Voz Real)
+el_client = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 VOICE_ID = "WOY6pnQ1WCg0mrOZ54lM"
 
-if not os.path.exists("static"):
-    os.makedirs("static")
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Inicialización Telnyx - USANDO LA CLAVE DIRECTAMENTE
-telnyx.api_key = Config.TELNYX_API_KEY
+# 2. Instanciar Cliente Telnyx v4.0.0
+# En v4 se usa la clase Telnyx() como cliente principal
+telnyx_client = telnyx.Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
+# Carpeta static
+if not os.path.exists("static"):
+    os.makedirs("static")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 asistente_activo = {}
-MAX_MP3_FILES = 20
+MAX_MP3_FILES = 15
 
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
         data = await request.json()
-        event = data.get("data", {})
-        payload = event.get("payload", {})
+        # Acceso a datos según estructura de eventos de Telnyx
+        event_data = data.get("data", {})
+        payload = event_data.get("payload", {})
+        event_type = event_data.get("event_type")
         call_id = payload.get("call_control_id")
         phone = payload.get("from")
-        event_type = event.get("event_type")
 
-        print(f"[EVENTO] {event_type} | Call ID: {call_id}")
+        if not call_id: return Response(status_code=200)
+
+        print(f"[EVENTO] {event_type} | ID: {call_id}")
 
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                # Contestamos la llamada
-                telnyx.Call.answer(call_id, call_control_id=call_id)
+                # SINTAXIS TELNYX v4: Acceso vía calls.answer
+                telnyx_client.calls.answer(call_id)
                 asistente_activo[call_id] = True
             else:
-                telnyx.Call.hangup(call_id, call_control_id=call_id)
+                telnyx_client.calls.hangup(call_id)
 
         elif event_type == "call.answered":
             time.sleep(1)
-            hablar(call_id, "Hi! I'm Thorthugo, your English tutor. Ready to practice?")
+            hablar(call_id, "Hola, soy Thorthugo. ¿Qué quieres practicar hoy?")
 
         elif event_type in ["call.speak.ended", "call.audio_playback.ended"]:
-            if asistente_activo.get(call_id, False):
-                # Activar el micrófono
-                telnyx.Call.gather_using_ai(
+            if asistente_activo.get(call_id):
+                # SINTAXIS TELNYX v4: gather_using_ai
+                telnyx_client.calls.gather_using_ai(
                     call_id,
-                    call_control_id=call_id,
+                    language="es-MX",
                     parameters={
-                        "language": "en-US",
                         "type": "object",
                         "properties": {"user_input": {"type": "string"}},
                         "required": ["user_input"]
@@ -77,23 +80,23 @@ async def webhook(request: Request):
             asistente_activo.pop(call_id, None)
 
     except Exception as e:
-        print(f"[ERROR Webhook] {e}")
+        print(f"[ERROR WEBHOOK] {e}")
     return Response(status_code=200)
 
 def hablar(call_id, texto):
-    if not asistente_activo.get(call_id, False): return
+    if not asistente_activo.get(call_id): return
 
     try:
-        # 1. Generar audio con ElevenLabs
-        audio_stream = client_elevenlabs.text_to_speech.convert(
+        # 1. ElevenLabs: Generación (Sintaxis v2 con Client)
+        audio_iterator = el_client.text_to_speech.convert(
             voice_id=VOICE_ID,
             text=texto,
             model_id="eleven_multilingual_v2"
         )
-        audio_bytes = b"".join(audio_stream)
+        audio_bytes = b"".join(audio_iterator)
 
-        timestamp = int(time.time() * 1000)
-        filename = f"audio_{timestamp}.mp3"
+        # 2. Guardar archivo
+        filename = f"audio_{int(time.time()*1000)}.mp3"
         filepath = os.path.join("static", filename)
         with open(filepath, "wb") as f:
             f.write(audio_bytes)
@@ -101,20 +104,16 @@ def hablar(call_id, texto):
         limpiar_archivos_mp3()
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-        # --- CORRECCIÓN FINAL TELNYX ---
-        # En la SDK de Python, se usa la clase telnyx.Call directamente pasándole el call_control_id
-        try:
-            telnyx.Call.playback_start(
-                call_id, # El primer argumento suele ser el identificador en la SDK
-                call_control_id=call_id, 
-                audio_url=audio_url
-            )
-            print(f"[EXITO] Thorthugo hablando: {audio_url}")
-        except Exception as e:
-            print(f"[ERROR Telnyx Playback] {e}")
+        # 3. TELNYX v4: Reproducción de audio
+        # Se llama directamente al método playback_start del recurso calls
+        telnyx_client.calls.playback_start(
+            call_id,
+            audio_url=audio_url
+        )
+        print(f"[OK] Reproduciendo: {filename}")
 
     except Exception as e:
-        print(f"[ERROR CRÍTICO HABLAR] {e}")
+        print(f"[ERROR HABLAR] {e}")
 
 def limpiar_archivos_mp3():
     files = sorted(glob.glob("static/audio_*.mp3"), key=os.path.getmtime)
