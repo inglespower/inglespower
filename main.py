@@ -11,11 +11,11 @@ from elevenlabs.client import ElevenLabs
 
 app = FastAPI()
 
-# 1. Instanciar ElevenLabs v2.x
+# 1. ElevenLabs v2.x
 el_client = ElevenLabs(api_key=Config.ELEVENLABS_API_KEY)
 VOICE_ID = "WOY6pnQ1WCg0mrOZ54lM"
 
-# 2. Instanciar Telnyx v4.0.0 (Esta es la forma correcta ahora)
+# 2. Telnyx v4.0.0 - Cliente instanciado
 telnyx_client = telnyx.Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
@@ -43,11 +43,11 @@ async def webhook(request: Request):
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
-                # SINTAXIS V4: Acceso directo vía calls.answer
-                telnyx_client.calls.answer(call_id)
+                # CORRECCIÓN V4: Acceso vía calls.call_control.answer
+                telnyx_client.calls.call_control.answer(call_id)
                 asistente_activo[call_id] = True
             else:
-                telnyx_client.calls.hangup(call_id)
+                telnyx_client.calls.call_control.hangup(call_id)
 
         elif event_type == "call.answered":
             time.sleep(1)
@@ -55,8 +55,8 @@ async def webhook(request: Request):
 
         elif event_type in ["call.speak.ended", "call.audio_playback.ended"]:
             if asistente_activo.get(call_id):
-                # SINTAXIS V4: gather_using_ai directamente desde el cliente
-                telnyx_client.calls.gather_using_ai(
+                # CORRECCIÓN V4: Acceso vía calls.call_control.gather_using_ai
+                telnyx_client.calls.call_control.gather_using_ai(
                     call_id,
                     language="es-MX",
                     parameters={
@@ -84,7 +84,7 @@ def hablar(call_id, texto):
     if not asistente_activo.get(call_id): return
 
     try:
-        # Generación con ElevenLabs v2
+        # ElevenLabs v2
         audio_iterator = el_client.text_to_speech.convert(
             voice_id=VOICE_ID,
             text=texto,
@@ -100,8 +100,8 @@ def hablar(call_id, texto):
         limpiar_archivos_mp3()
         audio_url = f"{MI_URL_RENDER}/static/{filename}"
 
-        # TELNYX V4: Reproducción de audio robusta
-        telnyx_client.calls.playback_start(
+        # CORRECCIÓN V4: Acceso vía calls.call_control.playback_start
+        telnyx_client.calls.call_control.playback_start(
             call_id,
             audio_url=audio_url
         )
