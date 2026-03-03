@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from config import Config
 from supabase_client import obtener_minutos, restar_minuto
 from ai import generar_respuesta
-from elevenlabs import generate, set_api_key  # versión 1.0.0
+from elevenlabs import set_api_key, generate_text_to_speech  # versión moderna
 
 app = FastAPI()
 
@@ -20,12 +20,12 @@ if not os.path.exists("static"):
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Telnyx cliente
+# Cliente Telnyx
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
 asistente_activo = {}
-MAX_MP3_FILES = 20
+MAX_MP3_FILES = 20  # Máximo de archivos MP3 guardados
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -94,10 +94,10 @@ async def webhook(request: Request):
 
 def hablar(call_id, texto):
     try:
-        # 1️⃣ Generar audio ElevenLabs
-        audio = generate(
-            text=texto,
-            voice="alloy",
+        # 1️⃣ Generar audio ElevenLabs (versión moderna)
+        audio_bytes = generate_text_to_speech(
+            texto,
+            voice="alloy",  # tu voz de ElevenLabs
             model="eleven_multilingual_v1"
         )
 
@@ -106,7 +106,7 @@ def hablar(call_id, texto):
         filename = f"audio_{timestamp}.mp3"
         filepath = os.path.join("static", filename)
         with open(filepath, "wb") as f:
-            f.write(audio)
+            f.write(audio_bytes)
         print(f"[AUDIO GENERADO] {filename}")
 
         # 3️⃣ Limpiar archivos antiguos
