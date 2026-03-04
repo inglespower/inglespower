@@ -17,9 +17,8 @@ openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 CLEAN_DOMAIN = Config.DOMAIN.replace("https://", "").replace("http://", "").strip("/")
 MI_URL_WSS = f"wss://{CLEAN_DOMAIN}/ws"
 
-# FUNCIÓN CORREGIDA (VERSIÓN DEFINITIVA)
+# FUNCIÓN TELNYX
 def telnyx_command(endpoint, payload=None):
-    # 🔥 AHORA USA /v2/ Y TIENE LA BARRA CORRECTA
     base_url = "https://api.telnyx.com/v2/"
     url = f"{base_url}{endpoint.lstrip('/')}"
     
@@ -35,6 +34,7 @@ def telnyx_command(endpoint, payload=None):
             res = requests.post(url, headers=headers)
         
         print(f"[TELNYX API] Status: {res.status_code} para {url}")
+        print(res.text)  # 👈 agregado para ver error exacto si ocurre
         return res
     except Exception as e:
         print(f"[ERR TELNYX API] Error de conexión a {url}: {e}")
@@ -54,12 +54,17 @@ async def webhook(request: Request):
 
         elif event_type == "call.answered" and call_id:
             print(f"[TELNYX] Contestada. Iniciando Stream en: {MI_URL_WSS}")
+
+            # 🔥 PAYLOAD CORREGIDO
             stream_payload = {
                 "stream_url": MI_URL_WSS,
-                "stream_track": "inbound_track",
-                "bidirectional_mode": "rtp"
+                "stream_track": "both_tracks"
             }
-            telnyx_command(f"calls/{call_id}/actions/streaming_start", stream_payload)
+
+            telnyx_command(
+                f"calls/{call_id}/actions/streaming_start",
+                stream_payload
+            )
 
     except Exception as e:
         print(f"[ERROR WEBHOOK] {e}")
@@ -72,13 +77,17 @@ async def websocket_endpoint(websocket: WebSocket):
     print("[WS] ¡CONECTADO! Thorthugo en línea.")
     
     audio_buffer = bytearray()
+
     try:
         while True:
             data = await websocket.receive_text()
             msg = json.loads(data)
 
             if msg["event"] == "start":
-                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo. Por fin estamos conectados.")
+                await thorthugo_habla(
+                    websocket,
+                    "¡Hola! Soy Thorthugo. Por fin estamos conectados."
+                )
 
             elif msg["event"] == "media":
                 chunk = base64.b64decode(msg["media"]["payload"])
@@ -87,6 +96,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 if len(audio_buffer) > 28000:
                     buffer_file = io.BytesIO(audio_buffer)
                     buffer_file.name = "audio.wav"
+
                     transcript = openai_client.audio.transcriptions.create(
                         model="whisper-1",
                         file=buffer_file
@@ -105,10 +115,12 @@ async def websocket_endpoint(websocket: WebSocket):
 async def thorthugo_habla(websocket, texto):
     try:
         url = f"https://api.elevenlabs.io{Config.VOICE_ID}/stream?output_format=ulaw_8000"
+
         headers = {
             "xi-api-key": Config.ELEVENLABS_API_KEY,
             "Content-Type": "application/json"
         }
+
         payload = {
             "text": texto,
             "model_id": "eleven_multilingual_v2"
