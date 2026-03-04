@@ -17,7 +17,9 @@ openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
 CLEAN_DOMAIN = Config.DOMAIN.replace("https://", "").replace("http://", "").strip("/")
 MI_URL_WSS = f"wss://{CLEAN_DOMAIN}/ws"
 
+# --------------------------------------------
 # FUNCIÓN TELNYX
+# --------------------------------------------
 def telnyx_command(endpoint, payload=None):
     base_url = "https://api.telnyx.com/v2/"
     url = f"{base_url}{endpoint.lstrip('/')}"
@@ -34,12 +36,15 @@ def telnyx_command(endpoint, payload=None):
             res = requests.post(url, headers=headers)
         
         print(f"[TELNYX API] Status: {res.status_code} para {url}")
-        print(res.text)  # 👈 agregado para ver error exacto si ocurre
+        print(res.text)  # Para ver errores exactos si ocurre
         return res
     except Exception as e:
         print(f"[ERR TELNYX API] Error de conexión a {url}: {e}")
         return None
 
+# --------------------------------------------
+# WEBHOOK PARA LLAMADAS TELNYX
+# --------------------------------------------
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
@@ -71,6 +76,9 @@ async def webhook(request: Request):
             
     return Response(status_code=200)
 
+# --------------------------------------------
+# WEBSOCKET PARA AUDIO EN TIEMPO REAL
+# --------------------------------------------
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -112,9 +120,13 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         print(f"[WS DISCONNECT] {e}")
 
+# --------------------------------------------
+# FUNCIÓN ELEVENLABS (TTS) CORREGIDA
+# --------------------------------------------
 async def thorthugo_habla(websocket, texto):
     try:
-        url = f"https://api.elevenlabs.io{Config.VOICE_ID}/stream?output_format=ulaw_8000"
+        # 🔥 URL correcta con VOICE_ID en path
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{Config.VOICE_ID}/stream?output_format=ulaw_8000"
 
         headers = {
             "xi-api-key": Config.ELEVENLABS_API_KEY,
@@ -126,6 +138,7 @@ async def thorthugo_habla(websocket, texto):
             "model_id": "eleven_multilingual_v2"
         }
 
+        # Streaming directo al WebSocket
         with requests.post(url, json=payload, headers=headers, stream=True) as response:
             if response.status_code == 200:
                 for chunk in response.iter_content(chunk_size=1024):
@@ -135,10 +148,15 @@ async def thorthugo_habla(websocket, texto):
                             "event": "media",
                             "media": {"payload": encoded}
                         })
+            else:
+                print(f"[ERR VOZ] Status: {response.status_code}, {response.text}")
 
     except Exception as e:
         print(f"[ERR VOZ] {e}")
 
+# --------------------------------------------
+# INICIO DEL SERVIDOR
+# --------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
