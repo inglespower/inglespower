@@ -34,12 +34,13 @@ def telnyx_command(endpoint, payload=None):
         else:
             res = requests.post(url, headers=headers)
 
-        print(f"[TELNYX API] Status: {res.status_code} para {url}")
+        print(f"[TELNYX API] {res.status_code} -> {endpoint}")
 
         if res.status_code >= 400:
-            print("TELNYX ERROR BODY:", res.text)
+            print("TELNYX ERROR:", res.text)
 
         return res
+
     except Exception as e:
         print("[ERR TELNYX API]", e)
         return None
@@ -63,7 +64,6 @@ def generar_audio_elevenlabs(texto):
             "model_id": "eleven_multilingual_v2"
         }
 
-        # IMPORTANTE: stream=True (booleano real)
         res = requests.post(url, json=payload, headers=headers, stream=True)
 
         if res.status_code == 200:
@@ -121,10 +121,26 @@ def subir_audio_supabase(local_path):
 async def webhook(request: Request):
 
     try:
+        body = await request.body()
+
+        # 🔥 Evita error si body está vacío
+        if not body:
+            print("Webhook vacío recibido")
+            return Response(status_code=200)
+
         data = await request.json()
+
+    except Exception as e:
+        print("[ERROR WEBHOOK JSON]", e)
+        return Response(status_code=200)
+
+    try:
         payload = data.get("data", {}).get("payload", {})
         event_type = data.get("data", {}).get("event_type")
         call_id = payload.get("call_control_id")
+
+        print("EVENT:", event_type)
+        print("CALL CONTROL ID:", call_id)
 
         if not call_id:
             return Response(status_code=200)
@@ -134,12 +150,12 @@ async def webhook(request: Request):
             print("[TELNYX] Contestando llamada:", call_id)
             telnyx_command(f"calls/{call_id}/actions/answer")
 
-        # 2️⃣ Cuando ya está contestada
+        # 2️⃣ Llamada contestada
         elif event_type == "call.answered":
             print("[TELNYX] Llamada contestada:", call_id)
 
-            # 🔥 Delay para evitar 404 por timing
-            await asyncio.sleep(0.8)
+            # 🔥 Pequeño delay para estabilidad
+            await asyncio.sleep(1)
 
             bienvenida = "Hola, soy InglesPower. Pregúntame lo que quieras practicar en inglés."
 
@@ -154,7 +170,7 @@ async def webhook(request: Request):
                         {"audio_url": audio_url}
                     )
 
-        # 3️⃣ Recibiendo audio del usuario
+        # 3️⃣ Recibir audio usuario
         elif event_type == "call.media.received":
             media_payload = payload.get("media", {})
             chunk_b64 = media_payload.get("payload")
@@ -202,13 +218,13 @@ async def webhook(request: Request):
             print("[TELNYX] Llamada colgada:", call_id)
 
     except Exception as e:
-        print("[ERROR WEBHOOK]", e)
+        print("[ERROR WEBHOOK LOGIC]", e)
 
     return Response(status_code=200)
 
 
 # ===============================
-# ROOT (evita 404 en GET /)
+# ROOT
 # ===============================
 
 @app.get("/")
@@ -217,7 +233,7 @@ def root():
 
 
 # ===============================
-# RUN LOCAL
+# RUN
 # ===============================
 
 if __name__ == "__main__":
