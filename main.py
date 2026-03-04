@@ -4,19 +4,26 @@ import base64
 import io
 import requests
 from fastapi import FastAPI, Request, Response, WebSocket
-import telnyx
 from config import Config
 from ai import generar_respuesta
 from openai import OpenAI
 
 app = FastAPI()
 
-# Configuración básica
-telnyx.api_key = Config.TELNYX_API_KEY
+# Inicialización
 openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
-
-# URL del WebSocket
 MI_URL_WSS = f"wss://{Config.DOMAIN}/ws"
+
+# Función auxiliar para hablar con la API de Telnyx sin el SDK
+def telnyx_command(endpoint, payload=None):
+    url = f"https://api.telnyx.com{endpoint}"
+    headers = {
+        "Authorization": f"Bearer {Config.TELNYX_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    if payload:
+        return requests.post(url, json=payload, headers=headers)
+    return requests.post(url, headers=headers)
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -26,39 +33,28 @@ async def webhook(request: Request):
         event_type = data.get("data", {}).get("event_type")
         call_id = payload.get("call_control_id")
 
-        if event_type == "call.initiated":
+        if event_type == "call.initiated" and call_id:
             print(f"[TELNYX] Contestando llamada: {call_id}")
-            # Intentamos la forma más compatible de la v4
-            telnyx.Call.answer(call_id)
+            telnyx_command(f"calls/{call_id}/actions/answer")
 
-        elif event_type == "call.answered":
+        elif event_type == "call.answered" and call_id:
             print(f"[TELNYX] Iniciando Stream en: {MI_URL_WSS}")
-            # Intentamos el comando de stream directo
-            telnyx.Call.streaming_start(
-                call_id,
-                stream_url=MI_URL_WSS,
-                stream_track="inbound_track",
-                bidirectional_mode="rtp"
-            )
+            stream_payload = {
+                "stream_url": MI_URL_WSS,
+                "stream_track": "inbound_track",
+                "bidirectional_mode": "rtp"
+            }
+            telnyx_command(f"calls/{call_id}/actions/streaming_start", stream_payload)
 
     except Exception as e:
-        # PLAN B: Si falla por nombre de atributo, usamos el recurso genérico
-        print(f"[AVISO] Reintentando con sintaxis alternativa por: {e}")
-        try:
-            if event_type == "call.initiated":
-                telnyx.api_request("POST", f"calls/{call_id}/actions/answer")
-            elif event_type == "call.answered":
-                params = {"stream_url": MI_URL_WSS, "bidirectional_mode": "rtp"}
-                telnyx.api_request("POST", f"calls/{call_id}/actions/streaming_start", params=params)
-        except Exception as e2:
-            print(f"[ERROR CRÍTICO] Nada funcionó: {e2}")
-
+        print(f"[ERROR WEBHOOK] {e}")
+            
     return Response(status_code=200)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("[WS] ¡CONECTADO! Thorthugo en línea.")
+    print("[WS] ¡CONECTADO! Thorthugo está en línea.")
     
     audio_buffer = bytearray()
     try:
@@ -67,7 +63,8 @@ async def websocket_endpoint(websocket: WebSocket):
             msg = json.loads(data)
 
             if msg["event"] == "start":
-                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo. Por fin me escuchas.")
+                print("[WS] Evento start recibido")
+                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo. Por fin estamos conectados.")
 
             elif msg["event"] == "media":
                 chunk = base64.b64decode(msg["media"]["payload"])
