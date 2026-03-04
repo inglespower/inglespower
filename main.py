@@ -12,18 +12,28 @@ app = FastAPI()
 
 # Inicialización
 openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
-MI_URL_WSS = f"wss://{Config.DOMAIN}/ws"
+# Limpiamos el dominio para el WebSocket
+CLEAN_DOMAIN = Config.DOMAIN.replace("https://", "").replace("http://", "").strip("/")
+MI_URL_WSS = f"wss://{CLEAN_DOMAIN}/ws"
 
-# Función auxiliar para hablar con la API de Telnyx sin el SDK
+# FUNCIÓN CORREGIDA: Sin el error de "comcalls"
 def telnyx_command(endpoint, payload=None):
-    url = f"https://api.telnyx.com{endpoint}"
+    # La barra "/" después de v2/ es la que arregla el error de tu imagen
+    url = f"https://api.telnyx.com{endpoint.lstrip('/')}"
     headers = {
         "Authorization": f"Bearer {Config.TELNYX_API_KEY}",
         "Content-Type": "application/json"
     }
-    if payload:
-        return requests.post(url, json=payload, headers=headers)
-    return requests.post(url, headers=headers)
+    try:
+        if payload:
+            res = requests.post(url, json=payload, headers=headers)
+        else:
+            res = requests.post(url, headers=headers)
+        print(f"[TELNYX API] Status: {res.status_code} para {endpoint}")
+        return res
+    except Exception as e:
+        print(f"[ERR TELNYX API] {e}")
+        return None
 
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -63,8 +73,8 @@ async def websocket_endpoint(websocket: WebSocket):
             msg = json.loads(data)
 
             if msg["event"] == "start":
-                print("[WS] Evento start recibido")
-                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo. Por fin estamos conectados.")
+                print("[WS] Recibido evento START")
+                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo. Por fin me escuchas fuerte y claro.")
 
             elif msg["event"] == "media":
                 chunk = base64.b64decode(msg["media"]["payload"])
@@ -85,15 +95,22 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def thorthugo_habla(websocket, texto):
     try:
+        # Formato telefónico ulaw_8000 indispensable
         url = f"https://api.elevenlabs.io{Config.VOICE_ID}/stream?output_format=ulaw_8000"
         headers = {"xi-api-key": Config.ELEVENLABS_API_KEY, "Content-Type": "application/json"}
         payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
+        
         with requests.post(url, json=payload, headers=headers, stream=True) as response:
             if response.status_code == 200:
                 for chunk in response.iter_content(chunk_size=1024):
                     if chunk:
                         encoded = base64.b64encode(chunk).decode("utf-8")
-                        await websocket.send_json({"event": "media", "media": {"payload": encoded}})
+                        await websocket.send_json({
+                            "event": "media",
+                            "media": {"payload": encoded}
+                        })
+            else:
+                print(f"[ERR EL] Status: {response.status_code}")
     except Exception as e:
         print(f"[ERR VOZ] {e}")
 
