@@ -77,32 +77,35 @@ def subir_audio_supabase(local_path):
 async def webhook(request: Request):
     try:
         data = await request.json()
+        print("=== PAYLOAD TELNYX ===")
+        print(json.dumps(data, indent=2))  # Debug para ver exactamente qué llega
+
         payload = data.get("data", {}).get("payload", {})
         event_type = data.get("data", {}).get("event_type")
         call_id = payload.get("call_control_id")
 
-        # Quitar "v3:" si está presente
-        if call_id and call_id.startswith("v3:"):
-            call_id = call_id.split("v3:")[1]
+        if not call_id:
+            print("[ERROR] call_control_id no encontrado")
+            return Response(status_code=400)
 
         # Contestamos la llamada y damos bienvenida
-        if event_type == "call.initiated" and call_id:
+        if event_type == "call.initiated":
             print(f"[TELNYX] Contestando llamada: {call_id}")
-            telnyx_command(f"calls/{call_id}/actions/answer")
-
-            # Bienvenida InglesPower
-            bienvenida = (
-                "¡Hola! Soy InglesPower, tu mejor recurso para aprender inglés. "
-                "Pregúntame lo que quieras o dime qué quieres aprender hoy."
-            )
-            audio_path = generar_audio_elevenlabs(bienvenida)
-            if audio_path:
-                audio_url = subir_audio_supabase(audio_path)
-                if audio_url:
-                    telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
+            answer_res = telnyx_command(f"calls/{call_id}/actions/answer")
+            if answer_res and answer_res.status_code == 200:
+                # Bienvenida InglesPower
+                bienvenida = (
+                    "¡Hola! Soy InglesPower, tu mejor recurso para aprender inglés. "
+                    "Pregúntame lo que quieras o dime qué quieres aprender hoy."
+                )
+                audio_path = generar_audio_elevenlabs(bienvenida)
+                if audio_path:
+                    audio_url = subir_audio_supabase(audio_path)
+                    if audio_url:
+                        telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
 
         # Procesar grabación automática cuando esté disponible
-        elif event_type == "recording.available" and call_id:
+        elif event_type == "recording.available":
             recording_url = payload.get("recording_url")
             if recording_url:
                 print(f"[TELNYX] Descargando audio del usuario: {recording_url}")
