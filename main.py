@@ -34,15 +34,15 @@ def telnyx_command(endpoint, payload=None):
         print(f"[ERR TELNYX API] Error de conexión a {url}: {e}")
         return None
 
-# Función para generar audio ElevenLabs
+# Generar audio ElevenLabs
 def generar_audio_elevenlabs(texto):
     try:
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{Config.VOICE_ID}/stream?output_format=mp3"
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{Config.VOICE_ID}/stream?output_format=ulaw_8000"
         headers = {"xi-api-key": Config.ELEVENLABS_API_KEY, "Content-Type": "application/json"}
         payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
         res = requests.post(url, json=payload, headers=headers, stream=True)
         if res.status_code == 200:
-            audio_path = f"/tmp/tts_{int(os.times().elapsed*1000)}.mp3"
+            audio_path = f"/tmp/tts_{int(os.times().elapsed*1000)}.ulaw"
             with open(audio_path, "wb") as f:
                 for chunk in res.iter_content(chunk_size=1024):
                     if chunk:
@@ -93,10 +93,9 @@ async def webhook(request: Request):
                 if audio_url:
                     telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
 
-            # Iniciar grabación inbound para escuchar al usuario
-            telnyx_command(f"calls/{call_id}/actions/record_start", {"direction":"inbound"})
+            # No usamos record_start manual → confiamos en Automatic Recording
 
-        # Cuando la grabación esté disponible
+        # Procesar grabación automática cuando esté disponible
         elif event_type == "recording.available" and call_id:
             recording_url = payload.get("recording_url")
             if recording_url:
@@ -115,7 +114,7 @@ async def webhook(request: Request):
                 user_text = transcript.text.strip()
                 print(f"[USER]: {user_text}")
 
-                # Generar respuesta Thorthugo/InglesPower
+                # Generar respuesta InglesPower
                 respuesta = generar_respuesta(user_text)
                 print(f"[INGLESPOWER]: {respuesta}")
 
