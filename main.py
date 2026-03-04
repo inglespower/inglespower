@@ -45,7 +45,7 @@ def generar_audio_elevenlabs(texto):
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{Config.VOICE_ID}/stream?output_format=ulaw_8000"
         headers = {"xi-api-key": Config.ELEVENLABS_API_KEY, "Content-Type": "application/json"}
         payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
-        res = requests.post(url, json=payload, headers=headers, stream=True)
+        res = requests.post(url, json=payload, headers=headers, stream=true)
         if res.status_code == 200:
             audio_path = f"/tmp/tts_{int(os.times().elapsed*1000)}.ulaw"
             with open(audio_path, "wb") as f:
