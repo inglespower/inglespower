@@ -61,7 +61,11 @@ def subir_audio_supabase(local_path):
         bucket_name = "audios"
         file_name = os.path.basename(local_path)
         with open(local_path, "rb") as f:
-            supabase.storage.from_(bucket_name).upload(file_name, f, {"cacheControl":"3600", "upsert": True})
+            supabase.storage.from_(bucket_name).upload(
+                file_name,
+                f,
+                {"cacheControl":"3600", "upsert":"true"}  # <- CORREGIDO: boolean -> string
+            )
         public_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
         return public_url
     except Exception as e:
