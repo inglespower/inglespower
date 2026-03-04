@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 from fastapi import FastAPI, Request, Response
 from config import Config
@@ -78,7 +79,7 @@ async def webhook(request: Request):
     try:
         data = await request.json()
         print("=== PAYLOAD TELNYX ===")
-        print(json.dumps(data, indent=2))  # Debug para ver exactamente qué llega
+        print(json.dumps(data, indent=2))
 
         payload = data.get("data", {}).get("payload", {})
         event_type = data.get("data", {}).get("event_type")
@@ -88,23 +89,28 @@ async def webhook(request: Request):
             print("[ERROR] call_control_id no encontrado")
             return Response(status_code=400)
 
-        # Contestamos la llamada y damos bienvenida
+        # Contestamos la llamada
         if event_type == "call.initiated":
             print(f"[TELNYX] Contestando llamada: {call_id}")
             answer_res = telnyx_command(f"calls/{call_id}/actions/answer")
-            if answer_res and answer_res.status_code == 200:
-                # Bienvenida InglesPower
-                bienvenida = (
-                    "¡Hola! Soy InglesPower, tu mejor recurso para aprender inglés. "
-                    "Pregúntame lo que quieras o dime qué quieres aprender hoy."
-                )
-                audio_path = generar_audio_elevenlabs(bienvenida)
-                if audio_path:
-                    audio_url = subir_audio_supabase(audio_path)
-                    if audio_url:
-                        telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
+        
+        # Esperar antes de reproducir bienvenida
+        elif event_type == "call.answered":
+            print(f"[TELNYX] Llamada contestada: {call_id}, esperando para reproducir bienvenida...")
+            time.sleep(0.2)  # 200ms de espera para asegurar canal de audio activo
 
-        # Procesar grabación automática cuando esté disponible
+            # Bienvenida InglesPower
+            bienvenida = (
+                "¡Hola! Soy InglesPower, tu mejor recurso para aprender inglés. "
+                "Pregúntame lo que quieras o dime qué quieres aprender hoy."
+            )
+            audio_path = generar_audio_elevenlabs(bienvenida)
+            if audio_path:
+                audio_url = subir_audio_supabase(audio_path)
+                if audio_url:
+                    telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
+
+        # Procesar grabación si está disponible
         elif event_type == "recording.available":
             recording_url = payload.get("recording_url")
             if recording_url:
