@@ -12,27 +12,32 @@ app = FastAPI()
 
 # Inicialización
 openai_client = OpenAI(api_key=Config.OPENAI_API_KEY)
+
 # Limpiamos el dominio para el WebSocket
 CLEAN_DOMAIN = Config.DOMAIN.replace("https://", "").replace("http://", "").strip("/")
 MI_URL_WSS = f"wss://{CLEAN_DOMAIN}/ws"
 
-# FUNCIÓN CORREGIDA: Sin el error de "comcalls"
+# FUNCIÓN CORREGIDA (VERSIÓN DEFINITIVA)
 def telnyx_command(endpoint, payload=None):
-    # La barra "/" después de v2/ es la que arregla el error de tu imagen
-    url = f"https://api.telnyx.com{endpoint.lstrip('/')}"
+    # 🔥 AHORA USA /v2/ Y TIENE LA BARRA CORRECTA
+    base_url = "https://api.telnyx.com/v2/"
+    url = f"{base_url}{endpoint.lstrip('/')}"
+    
     headers = {
         "Authorization": f"Bearer {Config.TELNYX_API_KEY}",
         "Content-Type": "application/json"
     }
+    
     try:
         if payload:
             res = requests.post(url, json=payload, headers=headers)
         else:
             res = requests.post(url, headers=headers)
-        print(f"[TELNYX API] Status: {res.status_code} para {endpoint}")
+        
+        print(f"[TELNYX API] Status: {res.status_code} para {url}")
         return res
     except Exception as e:
-        print(f"[ERR TELNYX API] {e}")
+        print(f"[ERR TELNYX API] Error de conexión a {url}: {e}")
         return None
 
 @app.post("/webhook")
@@ -48,7 +53,7 @@ async def webhook(request: Request):
             telnyx_command(f"calls/{call_id}/actions/answer")
 
         elif event_type == "call.answered" and call_id:
-            print(f"[TELNYX] Iniciando Stream en: {MI_URL_WSS}")
+            print(f"[TELNYX] Contestada. Iniciando Stream en: {MI_URL_WSS}")
             stream_payload = {
                 "stream_url": MI_URL_WSS,
                 "stream_track": "inbound_track",
@@ -64,7 +69,7 @@ async def webhook(request: Request):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    print("[WS] ¡CONECTADO! Thorthugo está en línea.")
+    print("[WS] ¡CONECTADO! Thorthugo en línea.")
     
     audio_buffer = bytearray()
     try:
@@ -73,8 +78,7 @@ async def websocket_endpoint(websocket: WebSocket):
             msg = json.loads(data)
 
             if msg["event"] == "start":
-                print("[WS] Recibido evento START")
-                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo. Por fin me escuchas fuerte y claro.")
+                await thorthugo_habla(websocket, "¡Hola! Soy Thorthugo. Por fin estamos conectados.")
 
             elif msg["event"] == "media":
                 chunk = base64.b64decode(msg["media"]["payload"])
@@ -83,23 +87,33 @@ async def websocket_endpoint(websocket: WebSocket):
                 if len(audio_buffer) > 28000:
                     buffer_file = io.BytesIO(audio_buffer)
                     buffer_file.name = "audio.wav"
-                    transcript = openai_client.audio.transcriptions.create(model="whisper-1", file=buffer_file)
+                    transcript = openai_client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=buffer_file
+                    )
                     
                     if transcript.text.strip():
                         print(f"[USER]: {transcript.text}")
                         respuesta = generar_respuesta(transcript.text)
                         await thorthugo_habla(websocket, respuesta)
+
                     audio_buffer.clear()
+
     except Exception as e:
         print(f"[WS DISCONNECT] {e}")
 
 async def thorthugo_habla(websocket, texto):
     try:
-        # Formato telefónico ulaw_8000 indispensable
         url = f"https://api.elevenlabs.io{Config.VOICE_ID}/stream?output_format=ulaw_8000"
-        headers = {"xi-api-key": Config.ELEVENLABS_API_KEY, "Content-Type": "application/json"}
-        payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
-        
+        headers = {
+            "xi-api-key": Config.ELEVENLABS_API_KEY,
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "text": texto,
+            "model_id": "eleven_multilingual_v2"
+        }
+
         with requests.post(url, json=payload, headers=headers, stream=True) as response:
             if response.status_code == 200:
                 for chunk in response.iter_content(chunk_size=1024):
@@ -109,8 +123,7 @@ async def thorthugo_habla(websocket, texto):
                             "event": "media",
                             "media": {"payload": encoded}
                         })
-            else:
-                print(f"[ERR EL] Status: {response.status_code}")
+
     except Exception as e:
         print(f"[ERR VOZ] {e}")
 
