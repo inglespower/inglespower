@@ -77,11 +77,23 @@ async def webhook(request: Request):
         event_type = data.get("data", {}).get("event_type")
         call_id = payload.get("call_control_id")
 
-        # Contestar llamada
+        # Contestamos la llamada y damos bienvenida
         if event_type == "call.initiated" and call_id:
             print(f"[TELNYX] Contestando llamada: {call_id}")
             telnyx_command(f"calls/{call_id}/actions/answer")
-            # Iniciar grabación inbound
+
+            # Bienvenida InglesPower
+            bienvenida = (
+                "¡Hola! Soy InglesPower, tu mejor recurso para aprender inglés. "
+                "Pregúntame lo que quieras o dime qué quieres aprender hoy."
+            )
+            audio_path = generar_audio_elevenlabs(bienvenida)
+            if audio_path:
+                audio_url = subir_audio_supabase(audio_path)
+                if audio_url:
+                    telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
+
+            # Iniciar grabación inbound para escuchar al usuario
             telnyx_command(f"calls/{call_id}/actions/record_start", {"direction":"inbound"})
 
         # Cuando la grabación esté disponible
@@ -103,9 +115,9 @@ async def webhook(request: Request):
                 user_text = transcript.text.strip()
                 print(f"[USER]: {user_text}")
 
-                # Generar respuesta Thorthugo
+                # Generar respuesta Thorthugo/InglesPower
                 respuesta = generar_respuesta(user_text)
-                print(f"[THORTHUGO]: {respuesta}")
+                print(f"[INGLESPOWER]: {respuesta}")
 
                 # Generar audio ElevenLabs
                 audio_path = generar_audio_elevenlabs(respuesta)
