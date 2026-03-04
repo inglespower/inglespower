@@ -64,7 +64,7 @@ def subir_audio_supabase(local_path):
             supabase.storage.from_(bucket_name).upload(
                 file_name,
                 f,
-                {"cacheControl":"3600", "upsert":"true"}  # <- CORREGIDO: boolean -> string
+                {"cacheControl":"3600", "upsert":"true"}  # CORREGIDO: boolean -> string
             )
         public_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
         return public_url
@@ -81,6 +81,10 @@ async def webhook(request: Request):
         event_type = data.get("data", {}).get("event_type")
         call_id = payload.get("call_control_id")
 
+        # Quitar "v3:" si está presente
+        if call_id and call_id.startswith("v3:"):
+            call_id = call_id.split("v3:")[1]
+
         # Contestamos la llamada y damos bienvenida
         if event_type == "call.initiated" and call_id:
             print(f"[TELNYX] Contestando llamada: {call_id}")
@@ -96,8 +100,6 @@ async def webhook(request: Request):
                 audio_url = subir_audio_supabase(audio_path)
                 if audio_url:
                     telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
-
-            # No usamos record_start manual → confiamos en Automatic Recording
 
         # Procesar grabación automática cuando esté disponible
         elif event_type == "recording.available" and call_id:
@@ -125,7 +127,6 @@ async def webhook(request: Request):
                 # Generar audio ElevenLabs
                 audio_path = generar_audio_elevenlabs(respuesta)
                 if audio_path:
-                    # Subir a Supabase
                     audio_url = subir_audio_supabase(audio_path)
                     if audio_url:
                         # Reproducir en la llamada
