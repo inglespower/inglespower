@@ -1,6 +1,7 @@
 import os
 import json
 import io
+import base64
 import requests
 from fastapi import FastAPI, Request, Response
 from config import Config
@@ -38,16 +39,15 @@ def telnyx_command(endpoint, payload=None):
         print(f"[ERR TELNYX API] Error de conexión a {url}: {e}")
         return None
 
-# Función para generar audio con ElevenLabs
+# Función para generar audio ElevenLabs (compatible Telnyx)
 def generar_audio_elevenlabs(texto):
     try:
-        # ⚡ Cambié output_format a ulaw_8000 que sí funciona con llamadas VoIP
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{Config.VOICE_ID}/stream?output_format=ulaw_8000"
         headers = {"xi-api-key": Config.ELEVENLABS_API_KEY, "Content-Type": "application/json"}
         payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
         res = requests.post(url, json=payload, headers=headers, stream=True)
         if res.status_code == 200:
-            audio_path = f"/tmp/tts_{int(os.times().elapsed*1000)}.wav"
+            audio_path = f"/tmp/tts_{int(os.times().elapsed*1000)}.ulaw"
             with open(audio_path, "wb") as f:
                 for chunk in res.iter_content(chunk_size=1024):
                     if chunk:
@@ -60,7 +60,7 @@ def generar_audio_elevenlabs(texto):
         print(f"[ERR VOZ] {e}")
         return None
 
-# Función para subir audio a Supabase y obtener URL pública
+# Subir audio a Supabase para obtener URL pública
 def subir_audio_supabase(local_path):
     try:
         bucket_name = "audios"
@@ -82,43 +82,54 @@ async def webhook(request: Request):
         event_type = data.get("data", {}).get("event_type")
         call_id = payload.get("call_control_id")
 
-        # ✅ Contestamos la llamada
         if event_type == "call.initiated" and call_id:
             print(f"[TELNYX] Contestando llamada: {call_id}")
             telnyx_command(f"calls/{call_id}/actions/answer")
-
-        # ✅ Reproducimos bienvenida personalizada y luego esperamos preguntas
-        elif event_type == "call.answered" and call_id:
-            print(f"[TELNYX] Reproduciendo bienvenida: {call_id}")
-
-            bienvenida = "Hola, soy InglesPower, tu mejor recurso para aprender inglés. ¿Qué quieres practicar hoy?"
+            
+            # Reproducir bienvenida
+            bienvenida = "¡Hola! Soy InglesPower, tu mejor recurso para aprender inglés. Pregúntame lo que quieras o dime qué necesitas practicar."
             audio_path = generar_audio_elevenlabs(bienvenida)
-
             if audio_path:
                 audio_url = subir_audio_supabase(audio_path)
                 if audio_url:
-                    play_payload = {"audio_url": audio_url}
-                    telnyx_command(f"calls/{call_id}/actions/play_audio", play_payload)
+                    telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
 
-            # ⚡ Luego puedes procesar la voz del usuario y responder dinámicamente
-            # Aquí simulamos texto de prueba; en producción usarías media events
-            user_text = payload.get("text", None)
-            if user_text:
-                respuesta = generar_respuesta(user_text)
-                print(f"[THORTHUGO] Respuesta: {respuesta}")
-                audio_path_resp = generar_audio_elevenlabs(respuesta)
-                if audio_path_resp:
-                    audio_url_resp = subir_audio_supabase(audio_path_resp)
-                    if audio_url_resp:
-                        play_payload_resp = {"audio_url": audio_url_resp}
-                        telnyx_command(f"calls/{call_id}/actions/play_audio", play_payload_resp)
+        elif event_type == "call.media.received" and call_id:
+            # Guardar audio del usuario en /tmp
+            media_payload = payload.get("media", {})
+            chunk_b64 = media_payload.get("payload")
+            if chunk_b64:
+                audio_bytes = base64.b64decode(chunk_b64)
+                tmp_user_audio = "/tmp/user_audio.wav"
+                with open(tmp_user_audio, "ab") as f:
+                    f.write(audio_bytes)
+        
+        elif event_type == "call.media.ended" and call_id:
+            # Cuando el usuario termina de hablar → transcribir y responder
+            tmp_user_audio = "/tmp/user_audio.wav"
+            if os.path.exists(tmp_user_audio):
+                with open(tmp_user_audio, "rb") as f:
+                    transcript = openai_client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f
+                    )
+                user_text = transcript.text.strip()
+                print(f"[USUARIO]: {user_text}")
+                if user_text:
+                    respuesta = generar_respuesta(user_text)
+                    print(f"[INGLESPOWER]: {respuesta}")
+                    audio_path = generar_audio_elevenlabs(respuesta)
+                    if audio_path:
+                        audio_url = subir_audio_supabase(audio_path)
+                        if audio_url:
+                            telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
+                os.remove(tmp_user_audio)
 
         elif event_type == "call.hangup" and call_id:
             print(f"[TELNYX] Llamada colgada: {call_id}")
 
     except Exception as e:
         print(f"[ERROR WEBHOOK] {e}")
-            
     return Response(status_code=200)
 
 if __name__ == "__main__":
