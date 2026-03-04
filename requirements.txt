@@ -2,7 +2,7 @@ fastapi
 uvicorn
 supabase
 openai>=1.0.0
-telnyx>=2.0.0
+telnyx==2.0.4
 elevenlabs==2.0.0
 requests
 httpx
