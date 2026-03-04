@@ -45,7 +45,7 @@ def generar_audio_elevenlabs(texto):
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{Config.VOICE_ID}/stream?output_format=ulaw_8000"
         headers = {"xi-api-key": Config.ELEVENLABS_API_KEY, "Content-Type": "application/json"}
         payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
-        res = requests.post(url, json=payload, headers=headers, stream=True)  # <- CORREGIDO
+        res = requests.post(url, json=payload, headers=headers, stream=True)
         if res.status_code == 200:
             audio_path = f"/tmp/tts_{int(os.times().elapsed*1000)}.ulaw"
             with open(audio_path, "wb") as f:
@@ -66,7 +66,11 @@ def subir_audio_supabase(local_path):
         bucket_name = "audios"
         file_name = os.path.basename(local_path)
         with open(local_path, "rb") as f:
-            supabase.storage.from_(bucket_name).upload(file_name, f, {"cacheControl":"3600", "upsert": True})
+            supabase.storage.from_(bucket_name).upload(
+                file_name,
+                f,
+                {"cacheControl": "3600", "upsert": "true"}  # Corregido: upsert como string
+            )
         public_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
         return public_url
     except Exception as e:
