@@ -2,6 +2,7 @@ import os
 import json
 import io
 import base64
+import time
 import requests
 from fastapi import FastAPI, Request, Response
 from config import Config
@@ -21,22 +22,19 @@ supabase: Client = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
 def telnyx_command(endpoint, payload=None):
     base_url = "https://api.telnyx.com/v2/"
     url = f"{base_url}{endpoint.lstrip('/')}"
-    
     headers = {
         "Authorization": f"Bearer {Config.TELNYX_API_KEY}",
         "Content-Type": "application/json"
     }
-    
     try:
         if payload:
             res = requests.post(url, json=payload, headers=headers)
         else:
             res = requests.post(url, headers=headers)
-        
-        print(f"[TELNYX API] Status: {res.status_code} para {url}")
+        print(f"[TELNYX API] Status: {res.status_code} -> {url}")
         return res
     except Exception as e:
-        print(f"[ERR TELNYX API] Error de conexión a {url}: {e}")
+        print(f"[ERR TELNYX API] Error conexión: {e}")
         return None
 
 # Función para generar audio ElevenLabs (compatible Telnyx)
@@ -45,9 +43,9 @@ def generar_audio_elevenlabs(texto):
         url = f"https://api.elevenlabs.io/v1/text-to-speech/{Config.VOICE_ID}/stream?output_format=ulaw_8000"
         headers = {"xi-api-key": Config.ELEVENLABS_API_KEY, "Content-Type": "application/json"}
         payload = {"text": texto, "model_id": "eleven_multilingual_v2"}
-        res = requests.post(url, json=payload, headers=headers, stream=True)  # <-- stream=True
+        res = requests.post(url, json=payload, headers=headers, stream=True)
         if res.status_code == 200:
-            audio_path = f"/tmp/tts_{int(os.times().elapsed*1000)}.ulaw"
+            audio_path = f"/tmp/tts_{int(time.time()*1000)}.ulaw"
             with open(audio_path, "wb") as f:
                 for chunk in res.iter_content(chunk_size=1024):
                     if chunk:
@@ -60,19 +58,22 @@ def generar_audio_elevenlabs(texto):
         print(f"[ERR VOZ] {e}")
         return None
 
-# Subir audio a Supabase para obtener URL pública
+# Subir audio a Supabase y verificar que esté disponible
 def subir_audio_supabase(local_path):
     try:
         bucket_name = "audios"
         file_name = os.path.basename(local_path)
         with open(local_path, "rb") as f:
-            supabase.storage.from_(bucket_name).upload(
-                file_name,
-                f,
-                {"cacheControl": "3600", "upsert": "true"}  # <-- corregido a string
-            )
+            supabase.storage.from_(bucket_name).upload(file_name, f, {"cacheControl":"3600", "upsert": True})
         public_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
-        return public_url
+        # Esperar hasta que la URL esté accesible
+        for i in range(10):  # hasta 10 intentos
+            r = requests.head(public_url)
+            if r.status_code == 200:
+                return public_url
+            time.sleep(0.5)  # espera medio segundo
+        print(f"[ERR SUPABASE] URL no disponible después de 5s: {public_url}")
+        return None
     except Exception as e:
         print(f"[ERR SUPABASE] {e}")
         return None
@@ -89,7 +90,7 @@ async def webhook(request: Request):
         if event_type == "call.initiated" and call_id:
             print(f"[TELNYX] Contestando llamada: {call_id}")
             telnyx_command(f"calls/{call_id}/actions/answer")
-            
+
             # Reproducir bienvenida
             bienvenida = "¡Hola! Soy InglesPower, tu mejor recurso para aprender inglés. Pregúntame lo que quieras o dime qué necesitas practicar."
             audio_path = generar_audio_elevenlabs(bienvenida)
@@ -99,7 +100,6 @@ async def webhook(request: Request):
                     telnyx_command(f"calls/{call_id}/actions/play_audio", {"audio_url": audio_url})
 
         elif event_type == "call.media.received" and call_id:
-            # Guardar audio del usuario en /tmp
             media_payload = payload.get("media", {})
             chunk_b64 = media_payload.get("payload")
             if chunk_b64:
@@ -107,9 +107,8 @@ async def webhook(request: Request):
                 tmp_user_audio = "/tmp/user_audio.wav"
                 with open(tmp_user_audio, "ab") as f:
                     f.write(audio_bytes)
-        
+
         elif event_type == "call.media.ended" and call_id:
-            # Cuando el usuario termina de hablar → transcribir y responder
             tmp_user_audio = "/tmp/user_audio.wav"
             if os.path.exists(tmp_user_audio):
                 with open(tmp_user_audio, "rb") as f:
