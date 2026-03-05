@@ -18,9 +18,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 client = Telnyx(api_key=Config.TELNYX_API_KEY)
 MI_URL_RENDER = "https://inglespower.onrender.com"
 
-# Control de estado para evitar duplicados
-asistente_activo = {}
-
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
@@ -34,8 +31,8 @@ async def webhook(request: Request):
         if event_type == "call.initiated":
             minutos = obtener_minutos(phone)
             if minutos > 0:
+                print(f"Llamada aceptada. Saldo: {minutos}")
                 client.calls.actions.answer(call_id)
-                asistente_activo[call_id] = False
             else:
                 client.calls.actions.hangup(call_id)
 
@@ -44,22 +41,23 @@ async def webhook(request: Request):
             hablar(call_id, "Welcome to your English practice. How can I help you today?")
 
         elif event_type in ["call.speak.ended", "call.playback.ended"]:
-            if not asistente_activo.get(call_id, False):
-                asistente_activo[call_id] = True
-                client.calls.actions.gather_using_ai(
-                    call_id, 
-                    parameters={
-                        "language": "en-US",
-                        "type": "object",
-                        "properties": {
-                            "user_input": {"type": "string", "description": "Response"}
-                        },
-                        "required": ["user_input"]
-                    }
-                )
+            # Corrección Error 422: Parámetros obligatorios
+            client.calls.actions.gather_using_ai(
+                call_id, 
+                parameters={
+                    "language": "en-US",
+                    "type": "object",
+                    "properties": {
+                        "user_input": {
+                            "type": "string",
+                            "description": "User response"
+                        }
+                    },
+                    "required": ["user_input"]
+                }
+            )
 
         elif event_type == "call.gather.ended":
-            asistente_activo[call_id] = False
             transcripcion = payload.get("transcription")
             if transcripcion:
                 respuesta = generar_respuesta(transcripcion)
