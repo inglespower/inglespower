@@ -1,157 +1,166 @@
 import os
 import requests
+import time
 from fastapi import FastAPI, Request
+from supabase import create_client
 
 app = FastAPI()
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
-ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
-# ---------------------------
+# -----------------------------
 # TELNYX API
-# ---------------------------
+# -----------------------------
 
-def telnyx_answer(call_control_id):
-    url = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/answer"
+def telnyx_api(path, data):
+url = f"https://api.telnyx.com/v2/{path}"
 
-    headers = {
-        "Authorization": f"Bearer {TELNYX_API_KEY}",
-        "Content-Type": "application/json"
-    }
+headers = {
+"Authorization": f"Bearer {TELNYX_API_KEY}",
+"Content-Type": "application/json"
+}
 
-    r = requests.post(url, headers=headers)
-    print("[TELNYX ANSWER]", r.status_code, r.text)
+r = requests.post(url, headers=headers, json=data)
 
+print(f"[TELNYX API] {r.status_code} -> {path}")
 
-def telnyx_play_audio(call_control_id, audio_url):
-    url = f"https://api.telnyx.com/v2/calls/{call_control_id}/actions/playback_start"
+if r.text:
+print(r.text)
 
-    headers = {
-        "Authorization": f"Bearer {TELNYX_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "audio_url": audio_url
-    }
-
-    r = requests.post(url, headers=headers, json=data)
-
-    print("[TELNYX PLAY]", r.status_code)
-    print(r.text)
+return r
 
 
-# ---------------------------
-# ELEVENLABS TTS
-# ---------------------------
+# -----------------------------
+# GENERAR AUDIO CON ELEVENLABS
+# -----------------------------
 
-def generate_voice(text):
+def generar_audio(texto):
 
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
+url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
 
-    headers = {
-        "xi-api-key": ELEVEN_API_KEY,
-        "Content-Type": "application/json"
-    }
+headers = {
+"xi-api-key": ELEVENLABS_API_KEY,
+"Content-Type": "application/json"
+}
 
-    data = {
-        "text": text,
-        "model_id": "eleven_multilingual_v2"
-    }
+payload = {
+"text": texto,
+"model_id": "eleven_multilingual_v2"
+}
 
-    r = requests.post(url, headers=headers, json=data)
+r = requests.post(url, headers=headers, json=payload)
 
-    filename = "voice.wav"
+filename = f"tts_{int(time.time())}.wav"
 
-    with open(filename, "wb") as f:
-        f.write(r.content)
+with open(filename, "wb") as f:
+f.write(r.content)
 
-    return filename
-
-
-# ---------------------------
-# SUPABASE UPLOAD
-# ---------------------------
-
-def upload_audio(file_path):
-
-    bucket = "audios"
-
-    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{file_path}"
-
-    headers = {
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "audio/wav"
-    }
-
-    with open(file_path, "rb") as f:
-        r = requests.post(url, headers=headers, data=f)
-
-    public = f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{file_path}"
-
-    print("PUBLIC URL:", public)
-
-    return public
+return filename
 
 
-# ---------------------------
-# WEBHOOK
-# ---------------------------
+# -----------------------------
+# SUBIR AUDIO A SUPABASE
+# -----------------------------
+
+def subir_audio(file):
+
+path = f"audios/{file}"
+
+with open(file, "rb") as f:
+supabase.storage.from_("audios").upload(
+path,
+f,
+{"content-type": "audio/wav"}
+)
+
+public = supabase.storage.from_("audios").get_public_url(path)
+
+print("URL PUBLICA:", public)
+
+return public
+
+
+# -----------------------------
+# WEBHOOK TELNYX
+# -----------------------------
 
 @app.post("/webhook")
-async def webhook(request: Request):
+async def webhook(req: Request):
 
-    data = await request.json()
+body = await req.body()
 
-    event = data["data"]["event_type"]
+if not body:
+return {"ok": True}
 
-    payload = data["data"]["payload"]
+data = await req.json()
 
-    call_control_id = payload["call_control_id"]
+event = data["data"]["event_type"]
+call = data["data"]["payload"]["call_control_id"]
 
-    print("EVENT:", event)
-    print("CALL:", call_control_id)
+print("EVENT:", event)
+print("CALL:", call)
 
-    # --------------------------------
-    # CALL START
-    # --------------------------------
+# -------------------------
+# LLAMADA ENTRANTE
+# -------------------------
 
-    if event == "call.initiated":
+if event == "call.initiated":
 
-        print("[TELNYX] Contestando llamada")
+print("[TELNYX] Contestando llamada")
 
-        telnyx_answer(call_control_id)
+telnyx_api(
+f"calls/{call}/actions/answer",
+{}
+)
 
-    # --------------------------------
-    # CALL ANSWERED
-    # --------------------------------
+# -------------------------
+# LLAMADA CONTESTADA
+# -------------------------
 
-    if event == "call.answered":
+if event == "call.answered":
 
-        print("[TELNYX] Generando voz")
+print("[TELNYX] Generando voz...")
 
-        file = generate_voice(
-            "Hola. Gracias por llamar. Este es mi asistente de inteligencia artificial."
-        )
+audio = generar_audio(
+"Hola, soy tu asistente de inteligencia artificial. ¿En qué puedo ayudarte?"
+)
 
-        url = upload_audio(file)
+url_audio = subir_audio(audio)
 
-        print("[TELNYX] Reproduciendo audio")
+time.sleep(2)
 
-        telnyx_play_audio(call_control_id, url)
+print("[TELNYX] Reproduciendo audio")
 
-    return {"ok": True}
+telnyx_api(
+f"calls/{call}/actions/playback_start",
+{
+"audio_url": url_audio
+}
+)
+
+# -------------------------
+# LLAMADA FINALIZADA
+# -------------------------
+
+if event == "call.hangup":
+
+print("[TELNYX] Llamada terminada")
+
+return {"ok": True}
 
 
-# ---------------------------
+# -----------------------------
 # ROOT
-# ---------------------------
+# -----------------------------
 
 @app.get("/")
 def root():
-    return {"server": "running"}
+return {"status": "running"}
