@@ -1,64 +1,90 @@
 import os
-import requests
 import time
+import requests
 from fastapi import FastAPI, Request
-from supabase import create_client
 
 app = FastAPI()
 
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ELEVEN_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
 VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
-# -----------------------------
-# TELNYX API
-# -----------------------------
 
-def telnyx_api(path, data):
-    url = f"https://api.telnyx.com/v2/{path}"
+# -------------------------
+# TELNYX API
+# -------------------------
+
+def telnyx_api(endpoint, payload):
+
+    url = f"https://api.telnyx.com/v2/{endpoint}"
 
     headers = {
         "Authorization": f"Bearer {TELNYX_API_KEY}",
         "Content-Type": "application/json"
     }
 
-    r = requests.post(url, headers=headers, json=data)
+    r = requests.post(url, headers=headers, json=payload)
 
-    print(f"[TELNYX API] {r.status_code} -> {path}")
+    print("[TELNYX API]", r.status_code, "->", endpoint)
 
-    if r.text:
+    try:
+        print(r.json())
+    except:
         print(r.text)
 
     return r
 
 
-# -----------------------------
-# GENERAR AUDIO CON ELEVENLABS
-# -----------------------------
+def answer_call(call_control_id):
 
-def generar_audio(texto):
+    telnyx_api(
+        f"calls/{call_control_id}/actions/answer",
+        {}
+    )
+
+
+def play_audio(call_control_id, audio_url):
+
+    telnyx_api(
+        f"calls/{call_control_id}/actions/playback_start",
+        {"audio_url": audio_url}
+    )
+
+
+def start_recording(call_control_id):
+
+    telnyx_api(
+        f"calls/{call_control_id}/actions/record_start",
+        {}
+    )
+
+
+# -------------------------
+# ELEVENLABS
+# -------------------------
+
+def tts(text):
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
 
     headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
+        "xi-api-key": ELEVEN_API_KEY,
         "Content-Type": "application/json"
     }
 
-    payload = {
-        "text": texto,
+    data = {
+        "text": text,
         "model_id": "eleven_multilingual_v2"
     }
 
-    r = requests.post(url, headers=headers, json=payload)
+    r = requests.post(url, headers=headers, json=data)
 
-    filename = f"tts_{int(time.time())}.wav"
+    filename = f"voice_{int(time.time())}.wav"
 
     with open(filename, "wb") as f:
         f.write(r.content)
@@ -66,101 +92,99 @@ def generar_audio(texto):
     return filename
 
 
-# -----------------------------
-# SUBIR AUDIO A SUPABASE
-# -----------------------------
+# -------------------------
+# SUPABASE
+# -------------------------
 
-def subir_audio(file):
+def upload_audio(file):
 
-    path = f"audios/{file}"
+    bucket = "audios"
+
+    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{file}"
+
+    headers = {
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "audio/wav"
+    }
 
     with open(file, "rb") as f:
-        supabase.storage.from_("audios").upload(
-            path,
-            f,
-            {"content-type": "audio/wav"}
-        )
 
-    public = supabase.storage.from_("audios").get_public_url(path)
+        r = requests.post(url, headers=headers, data=f)
 
-    print("URL PUBLICA:", public)
+    public = f"{SUPABASE_URL}/storage/v1/object/public/{bucket}/{file}"
+
+    print("PUBLIC:", public)
 
     return public
 
 
-# -----------------------------
-# WEBHOOK TELNYX
-# -----------------------------
+# -------------------------
+# OPENAI
+# -------------------------
+
+def ask_ai(text):
+
+    url = "https://api.openai.com/v1/chat/completions"
+
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}"
+    }
+
+    data = {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": "You are a helpful phone assistant"},
+            {"role": "user", "content": text}
+        ]
+    }
+
+    r = requests.post(url, headers=headers, json=data)
+
+    return r.json()["choices"][0]["message"]["content"]
+
+
+# -------------------------
+# WEBHOOK
+# -------------------------
 
 @app.post("/webhook")
-async def webhook(req: Request):
+async def webhook(request: Request):
 
-    body = await req.body()
-
-    if not body:
-        return {"ok": True}
-
-    data = await req.json()
+    data = await request.json()
 
     event = data["data"]["event_type"]
-    call = data["data"]["payload"]["call_control_id"]
+    payload = data["data"]["payload"]
 
-    print("EVENT:", event)
-    print("CALL:", call)
+    call_control_id = payload["call_control_id"]
 
-    # -------------------------
-    # LLAMADA ENTRANTE
-    # -------------------------
+    print("\nEVENT:", event)
+    print("CALL:", call_control_id)
+
+    # CALL START
 
     if event == "call.initiated":
 
-        print("[TELNYX] Contestando llamada")
+        print("Contestando llamada")
 
-        telnyx_api(
-            f"calls/{call}/actions/answer",
-            {}
-        )
+        answer_call(call_control_id)
 
-    # -------------------------
-    # LLAMADA CONTESTADA
-    # -------------------------
+    # CALL ANSWERED
 
     if event == "call.answered":
 
-        print("[TELNYX] Generando voz...")
+        greeting = "Soy Inglés Power. ¿Qué te gustaría aprender hoy? Pregúntame lo que quieras."
 
-        audio = generar_audio(
-            "Hola, soy tu asistente de inteligencia artificial. ¿En qué puedo ayudarte?"
-        )
+        voice = tts(greeting)
 
-        url_audio = subir_audio(audio)
+        url = upload_audio(voice)
 
-        time.sleep(2)
+        play_audio(call_control_id, url)
 
-        print("[TELNYX] Reproduciendo audio")
-
-        telnyx_api(
-            f"calls/{call}/actions/playback_start",
-            {
-                "audio_url": url_audio
-            }
-        )
-
-    # -------------------------
-    # LLAMADA FINALIZADA
-    # -------------------------
-
-    if event == "call.hangup":
-
-        print("[TELNYX] Llamada terminada")
+        start_recording(call_control_id)
 
     return {"ok": True}
 
 
-# -----------------------------
-# ROOT
-# -----------------------------
-
 @app.get("/")
 def root():
-    return {"status": "running"}
+    return {"AI": "PHONE AGENT RUNNING"}
