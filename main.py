@@ -1,10 +1,10 @@
 import os
 import time
-import json
-import requests
 from fastapi import FastAPI, Request
 from supabase import create_client
 from openai import OpenAI
+import requests
+from io import BytesIO
 
 app = FastAPI()
 
@@ -38,17 +38,12 @@ def telnyx_api(path, data):
 # GENERAR AUDIO OPENAI
 # -------------------------
 def generar_audio_bytes(texto):
-    """
-    Genera audio TTS con OpenAI y devuelve bytes listos para subir
-    """
     response = client.audio.speech.create(
         model="gpt-4o-mini-tts",
         voice="alloy",
         input=texto
     )
-    # <<--- Corrección clave: convertir HttpxBinaryResponseContent a bytes
-    audio_bytes = response.read()
-    return audio_bytes
+    return response.read()
 
 # -------------------------
 # SUBIR AUDIO A SUPABASE
@@ -65,6 +60,27 @@ def subir_audio(bytes_audio, nombre_archivo):
     return url
 
 # -------------------------
+# FUNCIONES DE ASISTENTE
+# -------------------------
+def procesar_respuesta_usuario(audio_bytes):
+    transcript = client.audio.transcriptions.create(
+        file=BytesIO(audio_bytes),
+        model="whisper-1"
+    )
+    texto_usuario = transcript.text
+    print("Usuario dijo:", texto_usuario)
+    return texto_usuario
+
+def generar_respuesta(texto_usuario):
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": texto_usuario}]
+    )
+    respuesta = resp.choices[0].message["content"]
+    print("Asistente responde:", respuesta)
+    return respuesta
+
+# -------------------------
 # WEBHOOK TELNYX
 # -------------------------
 @app.post("/webhook")
@@ -76,21 +92,28 @@ async def webhook(req: Request):
 
     print("EVENT:", event)
 
+    # CONTESTAR LLAMADA
     if event == "call.initiated":
         telnyx_api(f"calls/{call_id}/actions/answer", {})
 
+    # REPRODUCIR SALUDO INICIAL
     if event == "call.answered":
         time.sleep(1)
-        # Saludo inicial
         saludo = "Hola, soy InglesPower. ¿Qué quieres aprender hoy? Puedes preguntarme lo que quieras."
         audio_bytes = generar_audio_bytes(saludo)
         archivo_nombre = f"saludo_{int(time.time())}.mp3"
         url_audio = subir_audio(audio_bytes, archivo_nombre)
+        telnyx_api(f"calls/{call_id}/actions/playback_start", {"audio_url": url_audio})
 
-        telnyx_api(
-            f"calls/{call_id}/actions/playback_start",
-            {"audio_url": url_audio}
-        )
+    # ESCUCHAR AL USUARIO Y RESPONDER
+    if event == "input.audio.received":  # Evento de streaming de audio
+        audio_bytes = payload["audio_chunk"]  # bytes del usuario
+        texto_usuario = procesar_respuesta_usuario(audio_bytes)
+        respuesta = generar_respuesta(texto_usuario)
+        audio_bytes_resp = generar_audio_bytes(respuesta)
+        archivo_nombre = f"resp_{int(time.time())}.mp3"
+        url_audio = subir_audio(audio_bytes_resp, archivo_nombre)
+        telnyx_api(f"calls/{call_id}/actions/playback_start", {"audio_url": url_audio})
 
     if event == "call.hangup":
         print("Llamada terminada")
