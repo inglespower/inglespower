@@ -1,228 +1,113 @@
 import os
+import asyncio
+from fastapi import FastAPI, WebSocket, Request
 import requests
-import time
-from fastapi import FastAPI, Request, WebSocket
-from supabase import create_client
-from openai import OpenAI
+import websockets
 
 app = FastAPI()
 
+# -------------------------
+# VARIABLES DE ENTORNO
+# -------------------------
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-
-client = OpenAI(api_key=OPENAI_API_KEY)
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # -------------------------
 # TELNYX API
 # -------------------------
-
 def telnyx_api(path, data):
-
     url = f"https://api.telnyx.com/v2/{path}"
-
     headers = {
         "Authorization": f"Bearer {TELNYX_API_KEY}",
         "Content-Type": "application/json"
     }
-
     r = requests.post(url, headers=headers, json=data)
-
     print("[TELNYX]", r.status_code, path)
-
     if r.text:
         print(r.text)
-
     return r
-
-
-# -------------------------
-# GENERAR AUDIO
-# -------------------------
-
-def generar_audio(texto):
-
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
-
-    headers = {
-        "xi-api-key": ELEVENLABS_API_KEY,
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "text": texto,
-        "model_id": "eleven_multilingual_v2",
-        "output_format": "mp3_44100_128"
-    }
-
-    r = requests.post(url, headers=headers, json=payload)
-
-    filename = f"tts_{int(time.time())}.mp3"
-
-    with open(filename, "wb") as f:
-        f.write(r.content)
-
-    return filename
-
-
-# -------------------------
-# SUBIR AUDIO
-# -------------------------
-
-def subir_audio(file):
-
-    path = f"audios/{file}"
-
-    with open(file, "rb") as f:
-
-        supabase.storage.from_("audios").upload(
-            path,
-            f,
-            {"content-type": "audio/mpeg"}
-        )
-
-    url = supabase.storage.from_("audios").get_public_url(path)
-
-    return url
-
 
 # -------------------------
 # WEBHOOK TELNYX
 # -------------------------
-
 @app.post("/webhook")
 async def webhook(req: Request):
-
     data = await req.json()
-
     event = data["data"]["event_type"]
     payload = data["data"]["payload"]
-
     call_id = payload["call_control_id"]
 
     print("EVENT:", event)
 
-    # contestar llamada
+    # Contestar llamada automáticamente
     if event == "call.initiated":
+        telnyx_api(f"calls/{call_id}/actions/answer", {})
 
-        telnyx_api(
-            f"calls/{call_id}/actions/answer",
-            {}
-        )
-
-    # llamada contestada
+    # Cuando la llamada es contestada
     if event == "call.answered":
+        # Esperar 1 segundo antes de iniciar streaming
+        await asyncio.sleep(1)
 
-        time.sleep(1)
-
-        # iniciar streaming
+        # Iniciar streaming bidireccional
         telnyx_api(
             f"calls/{call_id}/actions/streaming_start",
-            {
-                "stream_url": "wss://inglespower.onrender.com/ws"
-            }
+            {"stream_url": "wss://inglespower.onrender.com/ws"}
         )
 
-        # saludo
-        audio = generar_audio(
-            "Hola, soy tu asistente de inteligencia artificial. ¿En qué puedo ayudarte?"
+        # Saludo inicial instantáneo
+        saludo = (
+            "Hola, soy InglesPower. "
+            "¿Qué quieres aprender hoy? Puedes preguntarme lo que quieras."
         )
 
-        url = subir_audio(audio)
-
-        time.sleep(1)
-
+        # Playback inicial del saludo
         telnyx_api(
             f"calls/{call_id}/actions/playback_start",
-            {
-                "audio_url": url
-            }
+            {"audio_url": f"https://api.elevenlabs.io/v1/text-to-speech-demo?text={saludo}"}
         )
 
     if event == "call.hangup":
-
         print("Llamada terminada")
 
     return {"ok": True}
 
-
 # -------------------------
-# WEBSOCKET STREAM
+# WEBSOCKET TELNYX <-> OPENAI REALTIME
 # -------------------------
-
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-
+async def ws_telnyx(ws: WebSocket):
     await ws.accept()
+    print("Telnyx streaming conectado")
 
-    print("Streaming conectado")
+    # Conexión con OpenAI Realtime Voice
+    async with websockets.connect(
+        "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
+        extra_headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "OpenAI-Beta": "realtime=v1"
+        }
+    ) as openai_ws:
 
-    audio_buffer = b""
+        print("OpenAI Realtime conectado")
 
-    while True:
+        # Función para enviar audio de Telnyx a OpenAI
+        async def from_telnyx():
+            while True:
+                msg = await ws.receive_bytes()
+                await openai_ws.send(msg)
 
-        message = await ws.receive()
+        # Función para enviar audio de OpenAI de vuelta a Telnyx
+        async def from_openai():
+            while True:
+                msg = await openai_ws.recv()
+                await ws.send_bytes(msg)
 
-        if "bytes" in message:
-
-            audio_buffer += message["bytes"]
-
-        if len(audio_buffer) > 400000:
-
-            filename = f"user_{int(time.time())}.wav"
-
-            with open(filename, "wb") as f:
-                f.write(audio_buffer)
-
-            audio_buffer = b""
-
-            with open(filename, "rb") as f:
-
-                transcription = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=f
-                )
-
-            texto = transcription.text
-
-            print("Usuario:", texto)
-
-            respuesta = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Eres un asistente amable que ayuda por teléfono."
-                    },
-                    {
-                        "role": "user",
-                        "content": texto
-                    }
-                ]
-            )
-
-            texto_respuesta = respuesta.choices[0].message.content
-
-            print("AI:", texto_respuesta)
-
-            audio = generar_audio(texto_respuesta)
-
-            url = subir_audio(audio)
-
-            print("Audio respuesta:", url)
-
+        # Ejecutar ambas funciones simultáneamente
+        await asyncio.gather(from_telnyx(), from_openai())
 
 # -------------------------
 # ROOT
 # -------------------------
-
 @app.get("/")
 def root():
-
     return {"status": "running"}
