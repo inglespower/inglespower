@@ -1,4 +1,5 @@
 import os
+import json
 import time
 from fastapi import FastAPI, Request
 from supabase import create_client
@@ -43,7 +44,7 @@ def generar_audio_bytes(texto):
         voice="alloy",
         input=texto
     )
-    return response.read()
+    return response.read()  # Devuelve bytes
 
 # -------------------------
 # SUBIR AUDIO A SUPABASE
@@ -60,9 +61,9 @@ def subir_audio(bytes_audio, nombre_archivo):
     return url
 
 # -------------------------
-# FUNCIONES DE ASISTENTE
+# PROCESAR AUDIO DEL USUARIO
 # -------------------------
-def procesar_respuesta_usuario(audio_bytes):
+def procesar_audio_usuario(audio_bytes):
     transcript = client.audio.transcriptions.create(
         file=BytesIO(audio_bytes),
         model="whisper-1"
@@ -88,27 +89,27 @@ async def webhook(req: Request):
     data = await req.json()
     event = data["data"]["event_type"]
     payload = data["data"]["payload"]
-    call_id = payload["call_control_id"]
-
+    call_id = payload.get("call_control_id")
     print("EVENT:", event)
 
     # CONTESTAR LLAMADA
     if event == "call.initiated":
         telnyx_api(f"calls/{call_id}/actions/answer", {})
 
-    # REPRODUCIR SALUDO INICIAL
+    # SALUDO INICIAL
     if event == "call.answered":
-        time.sleep(1)
         saludo = "Hola, soy InglesPower. ¿Qué quieres aprender hoy? Puedes preguntarme lo que quieras."
         audio_bytes = generar_audio_bytes(saludo)
         archivo_nombre = f"saludo_{int(time.time())}.mp3"
         url_audio = subir_audio(audio_bytes, archivo_nombre)
         telnyx_api(f"calls/{call_id}/actions/playback_start", {"audio_url": url_audio})
 
-    # ESCUCHAR AL USUARIO Y RESPONDER
-    if event == "input.audio.received":  # Evento de streaming de audio
-        audio_bytes = payload["audio_chunk"]  # bytes del usuario
-        texto_usuario = procesar_respuesta_usuario(audio_bytes)
+    # ESCUCHAR AUDIO DEL USUARIO
+    if event == "input.audio.received":
+        # Los bytes llegan en base64 en payload["audio_chunk"]
+        import base64
+        audio_bytes = base64.b64decode(payload["audio_chunk"])
+        texto_usuario = procesar_audio_usuario(audio_bytes)
         respuesta = generar_respuesta(texto_usuario)
         audio_bytes_resp = generar_audio_bytes(respuesta)
         archivo_nombre = f"resp_{int(time.time())}.mp3"
