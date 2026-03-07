@@ -1,19 +1,25 @@
 import os
-import asyncio
-from fastapi import FastAPI, WebSocket, Request
+import time
 import requests
-import websockets
+from fastapi import FastAPI, Request
+from supabase import create_client
+from openai import OpenAI
 
 app = FastAPI()
 
 # -------------------------
-# VARIABLES DE ENTORNO
+# CONFIGURACIÓN
 # -------------------------
 TELNYX_API_KEY = os.getenv("TELNYX_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 # -------------------------
-# TELNYX API
+# FUNCIONES TELNYX
 # -------------------------
 def telnyx_api(path, data):
     url = f"https://api.telnyx.com/v2/{path}"
@@ -26,6 +32,29 @@ def telnyx_api(path, data):
     if r.text:
         print(r.text)
     return r
+
+# -------------------------
+# FUNCIONES OPENAI
+# -------------------------
+def generar_audio(texto):
+    """Genera audio con OpenAI TTS y devuelve bytes"""
+    response = client.audio.speech.create(
+        model="gpt-4o-mini-tts",
+        voice="alloy",
+        input=texto
+    )
+    return response  # bytes del audio mp3
+
+# -------------------------
+# FUNCIONES SUPABASE
+# -------------------------
+def subir_audio(bytes_audio, nombre_archivo):
+    """Sube audio a Supabase y devuelve URL pública"""
+    path = f"audios/{nombre_archivo}"
+    supabase.storage.from_("audios").upload(path, bytes_audio, {"content-type": "audio/mpeg"})
+    url = supabase.storage.from_("audios").get_public_url(path)
+    print("URL PUBLICA:", url)
+    return url
 
 # -------------------------
 # WEBHOOK TELNYX
@@ -45,65 +74,24 @@ async def webhook(req: Request):
 
     # Cuando la llamada es contestada
     if event == "call.answered":
-        # Esperar 1 segundo antes de iniciar streaming
-        await asyncio.sleep(1)
+        time.sleep(1)
 
-        # Iniciar streaming bidireccional
-        telnyx_api(
-            f"calls/{call_id}/actions/streaming_start",
-            {"stream_url": "wss://inglespower.onrender.com/ws"}
-        )
+        # Saludo inicial
+        saludo = "Hola, soy InglesPower. ¿Qué quieres aprender hoy? Puedes preguntarme lo que quieras."
+        audio_bytes = generar_audio(saludo)
+        archivo_nombre = f"saludo_{int(time.time())}.mp3"
+        url_audio = subir_audio(audio_bytes, archivo_nombre)
 
-        # Saludo inicial instantáneo
-        saludo = (
-            "Hola, soy InglesPower. "
-            "¿Qué quieres aprender hoy? Puedes preguntarme lo que quieras."
-        )
-
-        # Playback inicial del saludo
+        # Reproducir audio en Telnyx
         telnyx_api(
             f"calls/{call_id}/actions/playback_start",
-            {"audio_url": f"https://api.elevenlabs.io/v1/text-to-speech-demo?text={saludo}"}
+            {"audio_url": url_audio}
         )
 
     if event == "call.hangup":
         print("Llamada terminada")
 
     return {"ok": True}
-
-# -------------------------
-# WEBSOCKET TELNYX <-> OPENAI REALTIME
-# -------------------------
-@app.websocket("/ws")
-async def ws_telnyx(ws: WebSocket):
-    await ws.accept()
-    print("Telnyx streaming conectado")
-
-    # Conexión con OpenAI Realtime Voice
-    async with websockets.connect(
-        "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
-        extra_headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "OpenAI-Beta": "realtime=v1"
-        }
-    ) as openai_ws:
-
-        print("OpenAI Realtime conectado")
-
-        # Función para enviar audio de Telnyx a OpenAI
-        async def from_telnyx():
-            while True:
-                msg = await ws.receive_bytes()
-                await openai_ws.send(msg)
-
-        # Función para enviar audio de OpenAI de vuelta a Telnyx
-        async def from_openai():
-            while True:
-                msg = await openai_ws.recv()
-                await ws.send_bytes(msg)
-
-        # Ejecutar ambas funciones simultáneamente
-        await asyncio.gather(from_telnyx(), from_openai())
 
 # -------------------------
 # ROOT
