@@ -1,4 +1,5 @@
 import os
+import random
 from fastapi import FastAPI, Request
 from openai import OpenAI
 import requests
@@ -17,6 +18,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # TELNYX API
 # -------------------------
 def telnyx_api(path, data):
+
     url = f"https://api.telnyx.com/v2/{path}"
 
     headers = {
@@ -35,9 +37,9 @@ def telnyx_api(path, data):
 
 
 # -------------------------
-# OPENAI RESPUESTA
+# RESPUESTA OPENAI
 # -------------------------
-def generar_respuesta(texto_usuario):
+def generar_respuesta(texto):
 
     try:
 
@@ -46,11 +48,11 @@ def generar_respuesta(texto_usuario):
             messages=[
                 {
                     "role": "system",
-                    "content": "Eres InglesPower, un tutor amable que ayuda a aprender inglés. Responde breve y claro."
+                    "content": "Eres InglesPower, un tutor amable que ayuda a aprender inglés. Responde corto y claro."
                 },
                 {
                     "role": "user",
-                    "content": texto_usuario
+                    "content": texto
                 }
             ]
         )
@@ -65,7 +67,33 @@ def generar_respuesta(texto_usuario):
 
         print("ERROR OPENAI:", e)
 
-        return "Lo siento, tuve un problema. ¿Puedes repetir?"
+        return "Lo siento, hubo un problema. ¿Puedes repetir?"
+
+
+# -------------------------
+# PREGUNTAS SI NO HABLA
+# -------------------------
+def pregunta_silencio():
+
+    preguntas = [
+
+        "No escuché nada. ¿Puedes decirme tu nombre?",
+
+        "¿Te gustaría practicar inglés conmigo?",
+
+        "Puedes preguntarme cualquier cosa en inglés o español.",
+
+        "Por ejemplo puedes decir. How are you?",
+
+        "¿Quieres aprender palabras nuevas en inglés?",
+
+        "Intenta decir algo en inglés y yo te ayudo.",
+
+        "También puedo ayudarte con pronunciación."
+
+    ]
+
+    return random.choice(preguntas)
 
 
 # -------------------------
@@ -87,7 +115,7 @@ async def webhook(req: Request):
         return {"ok": False}
 
     # -------------------------
-    # LLAMADA INICIADA
+    # CALL INITIATED
     # -------------------------
     if event == "call.initiated":
 
@@ -97,7 +125,7 @@ async def webhook(req: Request):
         )
 
     # -------------------------
-    # LLAMADA CONTESTADA
+    # CALL ANSWERED
     # -------------------------
     elif event == "call.answered":
 
@@ -108,15 +136,16 @@ async def webhook(req: Request):
             {
                 "payload": saludo,
                 "voice": "female",
-                "language": "es-MX",
+                "language": "es-US",
                 "input_type": "speech",
-                "timeout_secs": 5,
-                "max_speech_duration_secs": 20
+                "timeout_secs": 10,
+                "speech_timeout_secs": 3,
+                "max_speech_duration_secs": 30
             }
         )
 
     # -------------------------
-    # USUARIO TERMINÓ DE HABLAR
+    # USUARIO TERMINA DE HABLAR
     # -------------------------
     elif event == "call.gather.ended":
 
@@ -126,13 +155,18 @@ async def webhook(req: Request):
 
         if not texto_usuario:
 
+            pregunta = pregunta_silencio()
+
             telnyx_api(
                 f"calls/{call_id}/actions/gather_using_speak",
                 {
-                    "payload": "No te escuché bien. ¿Puedes repetir?",
+                    "payload": pregunta,
                     "voice": "female",
-                    "language": "es-MX",
-                    "input_type": "speech"
+                    "language": "es-US",
+                    "input_type": "speech",
+                    "timeout_secs": 10,
+                    "speech_timeout_secs": 3,
+                    "max_speech_duration_secs": 30
                 }
             )
 
@@ -145,15 +179,16 @@ async def webhook(req: Request):
             {
                 "payload": respuesta,
                 "voice": "female",
-                "language": "es-MX",
+                "language": "es-US",
                 "input_type": "speech",
-                "timeout_secs": 5,
-                "max_speech_duration_secs": 20
+                "timeout_secs": 10,
+                "speech_timeout_secs": 3,
+                "max_speech_duration_secs": 30
             }
         )
 
     # -------------------------
-    # LLAMADA TERMINADA
+    # CALL HANGUP
     # -------------------------
     elif event == "call.hangup":
 
