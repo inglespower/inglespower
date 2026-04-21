@@ -1,11 +1,7 @@
 fastapi
 uvicorn
-supabase
 openai>=1.0.0
-telnyx
-elevenlabs==2.0.0
+supabase
 requests
-httpx
 python-dotenv
-python-multipart
 websockets
