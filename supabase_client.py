@@ -3,6 +3,9 @@ from config import Config
 
 supabase = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
 
+# -------------------------
+# OBTENER MINUTOS
+# -------------------------
 def obtener_minutos(phone):
     try:
         res = supabase.table("users").select("minutes").eq("phone", phone).maybe_single().execute()
@@ -10,6 +13,10 @@ def obtener_minutos(phone):
     except:
         return 0
 
+
+# -------------------------
+# RESTAR MINUTO
+# -------------------------
 def restar_minuto(phone):
     minutos = obtener_minutos(phone)
     if minutos > 0:
